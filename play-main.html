@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MSP2D - 猫咪航天局</title>
+    <style>
+        body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+        /* 画布自适应：手机上自动缩放到装得下，触控不要触发滚动/双指缩放 */
+        canvas {
+            border: 1px solid #333; display: block;
+            max-width: 100vw; max-height: 100vh;
+            touch-action: none;
+        }
+        #hud {
+            position: absolute; top: 10px; left: 10px; color: #0f0;
+            font-family: monospace; font-size: 14px; pointer-events: none;
+            text-shadow: 1px 1px 2px #000; white-space: pre;
+        }
+        #controls {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            color: #fff; font-family: monospace; background: rgba(0,0,0,0.7);
+            padding: 10px 20px; border-radius: 8px; border: 1px solid #444;
+            font-size: 13px; pointer-events: none;
+        }
+        /* 右上角按钮改成一行 flex，窄屏会自动换行 */
+        #top-buttons {
+            position: absolute; top: 10px; right: 10px;
+            display: flex; gap: 8px; flex-wrap: wrap;
+            justify-content: flex-end; max-width: 72%;
+        }
+        .btn-save {
+            padding: 8px 15px; background: #333; color: #fff;
+            border: 1px solid #666; border-radius: 4px; cursor: pointer;
+            font-family: monospace; font-size: 13px;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        .btn-save:hover { background: #555; }
+        /* 节流阀（油门）条 */
+        #throttle-bar {
+            position: absolute; left: 14px; bottom: 200px;
+            width: 20px; height: 170px;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid #555; border-radius: 4px; overflow: hidden;
+        }
+        #throttle-fill {
+            position: absolute; left: 0; bottom: 0; width: 100%; height: 100%;
+            background: linear-gradient(#ffcc55, #ff8800);
+        }
+        #throttle-text {
+            position: absolute; left: 14px; bottom: 376px; width: 220px;
+            color: #ffcc55; font-family: monospace; font-size: 13px;
+            text-shadow: 1px 1px 2px #000;
+        }
+        /* 燃料条（最右边那根） */
+        #fuel-bar {
+            position: absolute; right: 14px; bottom: 200px;
+            width: 20px; height: 170px;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid #555; border-radius: 4px; overflow: hidden;
+        }
+        #fuel-fill {
+            position: absolute; left: 0; bottom: 0; width: 100%; height: 100%;
+            background: linear-gradient(#66ddff, #2288cc);
+        }
+        #fuel-text {
+            position: absolute; right: 14px; bottom: 376px; width: 260px;
+            color: #66ddff; font-family: monospace; font-size: 13px;
+            text-align: right; white-space: pre-line;
+            text-shadow: 1px 1px 2px #000;
+        }
+        /* 成就达成：上方中间弹出的横幅 */
+        #achievement {
+            position: absolute; top: 22px; left: 50%;
+            transform: translateX(-50%) translateY(-24px);
+            padding: 12px 30px; text-align: center; pointer-events: none;
+            background: rgba(10, 20, 40, 0.92);
+            border: 1px solid #4a90d9; border-radius: 10px;
+            box-shadow: 0 0 26px rgba(74, 144, 217, 0.55);
+            opacity: 0; transition: opacity .35s, transform .35s;
+            font-family: monospace; white-space: nowrap; z-index: 10;
+        }
+        #achievement-title { color: #4a90d9; font-size: 12px; letter-spacing: 5px; }
+        #achievement-name { color: #fff; font-size: 22px; letter-spacing: 2px; margin-top: 3px; }
+        #achievement-desc { color: #9cc4e8; font-size: 13px; margin-top: 5px; }
+        /* 成就列表（按 C 打开 / 关闭） */
+        #achievement-panel {
+            display: none; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 640px; max-height: 80%; overflow-y: auto;
+            padding: 16px 22px;
+            background: rgba(6, 12, 24, 0.95);
+            border: 1px solid #35506e; border-radius: 10px;
+            font-family: monospace; z-index: 11;
+        }
+        .ach-head { color: #4a90d9; font-size: 15px; letter-spacing: 2px; margin-bottom: 10px; text-align: center; }
+        .ach-row { display: flex; font-size: 13px; padding: 3px 0; }
+        .ach-mark { width: 22px; }
+        .ach-name { width: 116px; }
+        .ach-desc { flex: 1; }
+        .ach-row.got { color: #7fe0a8; }
+        .ach-row.locked { color: #46586c; }
+        /* ==================== 触控按键（手机自动显示，桌面按 T 或点"触控"也能开） ==================== */
+        #touch-controls { position: absolute; inset: 0; pointer-events: none; display: none; }
+        #touch-controls .pad { position: absolute; display: flex; gap: 8px; flex-wrap: wrap; width: 184px; }
+        #touch-controls .pad-left { left: 12px; bottom: 12px; }
+        #touch-controls .pad-right { right: 12px; bottom: 12px; justify-content: flex-end; }
+        .tbtn {
+            pointer-events: auto; touch-action: none;
+            min-width: 86px; padding: 16px 14px;
+            font-family: monospace; font-size: 15px; color: #cfe6ff;
+            background: rgba(20, 34, 56, 0.62);
+            border: 1px solid #4a6f9a; border-radius: 12px;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none; cursor: pointer;
+        }
+        .tbtn.small { min-width: 54px; padding: 9px 6px; font-size: 12px; }
+        .tbtn.wide { flex: 1 1 100%; min-width: 0; }
+        .tbtn.active { background: rgba(74, 144, 217, 0.85); color: #fff; }
+        #t-ignite {
+            padding: 18px 10px; font-size: 17px;
+            border-radius: 14px; border-color: #d08a2a; color: #ffd48a;
+            background: rgba(60, 36, 8, 0.72);
+        }
+        #t-ignite.active { background: rgba(255, 170, 0, 0.9); color: #241400; }
+        /* 屏幕矮的时候（横屏手机）把东西都缩小一点 */
+        @media (max-height: 620px) {
+            #hud { font-size: 11px; }
+            #throttle-bar, #fuel-bar { height: 88px; bottom: 150px; }
+            #throttle-text, #fuel-text { font-size: 11px; bottom: 244px; }
+            .tbtn { min-width: 68px; padding: 11px 8px; font-size: 13px; }
+            .tbtn.small { min-width: 48px; padding: 7px 4px; font-size: 11px; }
+            #t-ignite { padding: 13px 8px; font-size: 15px; }
+        }
+        /* 观战模式角标 */
+        #spectator-badge {
+            display: none; position: absolute; top: 50%; left: 22px;
+            transform: translateY(-50%);
+            color: #ffc35c; font-family: monospace; font-size: 15px;
+            letter-spacing: 4px; writing-mode: vertical-rl;
+            text-shadow: 0 0 12px rgba(255,195,92,.7); pointer-events: none;
+        }
+        /* 竖屏手机：按键再缩一圈，左右两排才不会打架 */
+        @media (max-width: 460px) {
+            #touch-controls .pad { width: 150px; gap: 6px; }
+            .tbtn { min-width: 70px; padding: 11px 8px; font-size: 12px; }
+            .tbtn.small { min-width: 44px; padding: 7px 3px; font-size: 11px; }
+            #top-buttons { max-width: 62%; gap: 6px; }
+            .btn-save { padding: 6px 10px; font-size: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game" width="1000" height="700"></canvas>
+    <div id="hud"></div>
+    <div id="throttle-bar"><div id="throttle-fill"></div></div>
+    <div id="throttle-text">油门 100%</div>
+    <div id="fuel-bar"><div id="fuel-fill"></div></div>
+    <div id="fuel-text">燃料 100%</div>
+    <div id="achievement">
+        <div id="achievement-title">成 就 达 成</div>
+        <div id="achievement-name"></div>
+        <div id="achievement-desc"></div>
+    </div>
+    <div id="achievement-panel"></div>
+    <div id="spectator-badge">观 战 中</div>
+    <div id="controls">E 点火/关机　A D 旋转　↑↓ 油门(Shift 微调)　[ ] 缩放　+ 加油 / - 卸油(要着陆)　S 存档　L 读档　C 成就　M 音乐　|　蓝色虚线 = 预测轨道</div>
+    <div id="top-buttons">
+        <button class="btn-save" onclick="saveGame()">存档</button>
+        <button class="btn-save" onclick="loadGame()">读档</button>
+        <button class="btn-save" onclick="toggleAchievementPanel()">成就</button>
+        <button class="btn-save" onclick="toggleBgm()">音乐</button>
+        <button class="btn-save" onclick="showCoopInfo()">协同</button>
+        <button class="btn-save" onclick="toggleTouchPanel()">触控</button>
+    </div>
+
+    <!-- 触控按键：按下 = 按下对应的键，和键盘走同一套逻辑 -->
+    <div id="touch-controls">
+        <div class="pad pad-left">
+            <button class="tbtn small" id="t-zoom-out">缩小</button>
+            <button class="tbtn small" id="t-zoom-in">放大</button>
+            <button class="tbtn small" id="t-fine">微调</button>
+            <button class="tbtn" id="t-left">◀ 左转</button>
+            <button class="tbtn" id="t-right">右转 ▶</button>
+        </div>
+        <div class="pad pad-right">
+            <button class="tbtn small" id="t-dump">卸油</button>
+            <button class="tbtn small" id="t-fuel">加油</button>
+            <button class="tbtn" id="t-thr-down">油门 −</button>
+            <button class="tbtn" id="t-thr-up">油门 ＋</button>
+            <button class="tbtn wide" id="t-ignite">点火 / 关机</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        const hud = document.getElementById('hud');
+        const throttleFill = document.getElementById('throttle-fill');
+        const throttleText = document.getElementById('throttle-text');
+        const fuelFill = document.getElementById('fuel-fill');
+        const fuelText = document.getElementById('fuel-text');
+        const achievementEl = document.getElementById('achievement');
+        const achievementTitleEl = document.getElementById('achievement-title');
+        const achievementNameEl = document.getElementById('achievement-name');
+        const achievementDescEl = document.getElementById('achievement-desc');
+        const achievementPanelEl = document.getElementById('achievement-panel');
+        const touchControlsEl = document.getElementById('touch-controls');
+
+        // ==================== 多端协同 ====================
+        // 服务器上的服主决定每个端是「操控」还是「观战」。
+        // 操控端算物理并上报；观战端不跑物理，只把服务器状态插值渲染出来。
+        let clientId = "";
+        try {
+            clientId = localStorage.getItem("msp2d-client-id") || "";
+            if (!clientId) {
+                clientId = "c" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+                localStorage.setItem("msp2d-client-id", clientId);
+            }
+        } catch (e) { clientId = "c" + Math.random().toString(36).slice(2, 10); }
+
+        let myRole = "control";        // 默认单人自己玩，就是操控端
+        let isAdmin = false;
+        let onlineCount = 1;
+        let controllerId = null;
+        let netMode = false;           // 有没有连上协同服务器
+        let lastSentAt = 0;
+        let lastCtrlPollAt = 0;
+        let lastStatePollAt = 0;
+        let lastRecvAt = 0;
+
+        // 观战端用：服务器状态 + 插值
+        let remotePrev = null;
+        let remoteNext = null;
+        let remoteRecvTime = 0;
+        const SEND_INTERVAL_MS = 100;   // 操控端每 100ms 上报一次
+        const POLL_INTERVAL_MS = 100;   // 观战端每 100ms 拉一次
+        const CTRL_INTERVAL_MS = 1000;  // 每 1 秒问一次自己是什么角色
+        const REMOTE_TIMEOUT_MS = 3000;
+
+        function isSpectator() { return netMode && myRole !== "control"; }
+
+        function apiUrl(path) {
+            return path + (path.indexOf("?") >= 0 ? "&" : "?") + "cid=" + encodeURIComponent(clientId);
+        }
+
+        async function pollControl() {
+            try {
+                const r = await fetch(apiUrl("/api/ctrl"));
+                const d = await r.json();
+                netMode = true;
+                const changed = (d.role !== myRole);
+                myRole = d.role;
+                isAdmin = !!d.is_admin;
+                onlineCount = d.online_count || 1;
+                controllerId = d.controller || null;
+                if (changed) {
+                    const spectating = myRole !== "control";
+                    toastQueue.push({
+                        name: spectating ? "观战模式" : "操控模式",
+                        desc: spectating ? "服主把你设为观战端，跟操控端一起看" : "服主把操控权交给你了，开始操作吧",
+                        title: "协 同 通 知"
+                    });
+                }
+            } catch (e) {
+                netMode = false;   // 服务器不在（比如直接双击打开 html），就单机自己玩
+            }
+        }
+
+        async function sendState() {
+            if (isSpectator()) return;
+            const now = performance.now();
+            if (now - lastSentAt < SEND_INTERVAL_MS) return;
+            lastSentAt = now;
+            const payload = {
+                rocket: { x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy, angle: rocket.angle,
+                          throttle: rocket.throttle, fuel: rocket.fuel, state: rocket.state, landed: rocket.landed },
+                camera: { x: camera.x, y: camera.y, zoom: camera.zoom },
+                orbits: stats.orbits,
+            };
+            try {
+                await fetch(apiUrl("/api/state"), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+            } catch (e) { /* 掉线了也不影响本地继续玩 */ }
+        }
+
+        async function fetchState() {
+            if (!isSpectator()) return;
+            const now = performance.now();
+            if (now - lastStatePollAt < POLL_INTERVAL_MS) return;
+            lastStatePollAt = now;
+            try {
+                const r = await fetch(apiUrl("/api/state?since=0"));
+                const d = await r.json();
+                if (d && d.changed && d.world) {
+                    remotePrev = remoteNext || d.world;
+                    remoteNext = d.world;
+                    remoteRecvTime = performance.now();
+                    lastRecvAt = remoteRecvTime;
+                }
+            } catch (e) {}
+        }
+
+        // 观战端：把服务器来的状态插值到当前帧，画面才顺滑
+        function applyRemoteWorld() {
+            const now = performance.now();
+            const stale = (now - lastRecvAt) > REMOTE_TIMEOUT_MS;
+
+            if (!remoteNext) {
+                if (stale) hud.innerText = "等待操控端连接...";
+                return;
+            }
+            const t = Math.min(1, (now - remoteRecvTime) / POLL_INTERVAL_MS);
+            const a = remotePrev && remotePrev.rocket ? remotePrev.rocket : remoteNext.rocket;
+            const b = remoteNext.rocket;
+            const lerp = (p, q) => p + (q - p) * t;
+
+            // 角度走最短弧，避免从 359° 转到 1° 时整圈乱转
+            let da = b.angle - a.angle;
+            while (da > 180) da -= 360;
+            while (da < -180) da += 360;
+
+            rocket.x = lerp(a.x, b.x);
+            rocket.y = lerp(a.y, b.y);
+            rocket.vx = b.vx; rocket.vy = b.vy;
+            rocket.angle = ((a.angle + da * t) % 360 + 360) % 360;
+            rocket.throttle = b.throttle;
+            rocket.fuel = b.fuel;
+            rocket.state = b.state;
+            rocket.landed = b.landed;
+
+            if (remoteNext.camera) {
+                camera.x = lerp(camera.x, remoteNext.camera.x);
+                camera.y = lerp(camera.y, remoteNext.camera.y);
+                camera.zoom = lerp(camera.zoom, remoteNext.camera.zoom);
+            }
+            if (typeof remoteNext.orbits === "number" && remoteNext.orbits > stats.orbits) {
+                stats.orbits = remoteNext.orbits;
+            }
+        }
+
+        // ==================== 背景音乐：miaosic / Higher ====================
+        const bgm = new Audio('miaosic/BGM-Higher.mp3');
+        bgm.loop = true;
+        bgm.volume = 0.45;
+
+        let bgmMuted = false;
+        try { bgmMuted = localStorage.getItem('msp2d-bgm-muted') === '1'; } catch (e) {}
+        if (bgmMuted) bgm.volume = 0;
+
+        function startBgm() {
+            if (bgmMuted) return;
+            try {
+                const p = bgm.play();
+                if (p && p.catch) p.catch(() => {});   // 浏览器不让自动播放就先算了
+            } catch (e) {}
+        }
+
+        function toggleBgm() {
+            bgmMuted = !bgmMuted;
+            try { localStorage.setItem('msp2d-bgm-muted', bgmMuted ? '1' : '0'); } catch (e) {}
+            if (bgmMuted) {
+                bgm.pause();
+            } else {
+                bgm.volume = 0.45;
+                startBgm();
+            }
+        }
+
+        // 浏览器规定：必须先有用户操作（点击 / 按键）才允许放声音
+        canvas.addEventListener('pointerdown', startBgm);
+        window.addEventListener('pointerdown', startBgm);
+        window.addEventListener('keydown', startBgm);
+
+        // ==== 游戏数据 ====
+        // 星球：radius = 半径（像素），越大星球越大。
+        // 引力用“平方反比”，和真实星球、和 SFS 一样：
+        //     引力 = surfaceGravity × (radius / 距离)²
+        // 所以贴着地面时的引力就是 surfaceGravity —— 想让星球变重只改这个数。
+        const planet = {
+            x: 500, y: 350,
+            radius: 1600,          // 半径（像素）
+            surfaceGravity: 200    // 贴着地面时的引力（px/s²）—— 数字越大星球越"重"，越难起飞
+        };
+        const rocket = {
+            x: planet.x, y: planet.y - (planet.radius + 8), vx: 0, vy: 0,   // 一开始就停在星球表面（跟着半径自动算，改星球大小不用再改这里）
+            angle: 90,
+            throttle: 1,                      // 节流阀：0 ~ 1
+            fuel: 1,                          // 燃料：0 ~ 1（1 = 满格）
+            state: 'idle',                    // idle = 关机，firing = 点火
+            landed: true                      // 是否正停在星球上
+        };
+
+        // ==== 视角控制 ====
+        let camera = { x: 0, y: 0, zoom: 0.5, minZoom: 0.1, maxZoom: 5.0 };
+
+        // 物理参数
+        const FIXED_DT = 1 / 60;
+        let accumulator = 0;
+        let lastTime = performance.now();
+
+        // 旋转速度（度/秒），改成你要的手感就调这个数
+        const ROTATE_SPEED = 180;
+
+        // 节流阀调节速度（每秒变化多少），按住 Shift 改成微调速度
+        const THROTTLE_RATE = 0.30;
+        const THROTTLE_FINE_RATE = 0.06;
+
+        // 缩放：按住 [ / ] 时的缩放速度（每秒乘多少）
+        const ZOOM_RATE_PER_SEC = 0.25;
+
+        // 燃料：满格能烧多少秒（100% 油门），以及在地面加油/卸油的速度（每秒多少格）
+        const FUEL_BURN_SECONDS = 120;  // 满油门烧完一箱要多少秒（数字越大油越多、越耐用）
+        const FUEL_FILL_RATE = 0.6;     // 每秒补 60%，大约 1.7 秒加满
+
+        // ==================== 质量模型（燃料会变轻）====================
+        // 总质量 = 空船质量 + 燃料质量
+        // 加速度 = 推力 / 总质量
+        // 所以：油越少 → 飞船越轻 → 同样的油门加速越快。
+        // 这也是真实火箭的脾气（齐奥尔科夫斯基公式讲的就是这件事）。
+        // 单位对齐很重要：以前 thrustPower=120 是直接当「加速度」用的，
+        // 现在改成「推力 ÷ 质量」，所以满油时必须除出 120 才不改变手感。
+        //   空船 60 + 满油 60 = 满油质量 120
+        //   满油推力 36000 ÷ 120 = 300 px/s²，推重比 1.5:1
+        //   空船       36000 ÷  60 = 600 px/s²，推重比 3:1（油烧光后推力翻倍）
+        const DRY_MASS = 60;            // 空船质量（燃料烧光后剩下的）
+        const FUEL_MASS = 60;           // 满油时燃料的质量
+        const FULL_THRUST = 36000;      // 满油门时的总推力
+
+        function shipMass(fuel) {
+            return DRY_MASS + FUEL_MASS * Math.max(0, Math.min(1, fuel));
+        }
+
+        // 当前实际加速度（已经算上油门和质量）
+        function thrustAccel(fuel, throttle) {
+            return FULL_THRUST * throttle / shipMass(fuel);
+        }
+
+        let fuelMsgTimer = 0;           // 在空中按 +/- 时的提示，显示 2 秒
+
+        // ==================== 成就系统 ====================
+        const achievements = [
+            { id: 'first_flight',  name: '首飞',       desc: '第一次点火离开星球表面' },
+            { id: 'soft_landing',  name: '稳如老猫',   desc: '着陆时垂直速度低于 20 px/s' },
+            { id: 'hard_landing',  name: '硬着陆',     desc: '以超过 250 px/s 的速度砸在星球上还活着' },
+            { id: 'refuel_full',   name: '补给完毕',   desc: '在地面上把燃料加满' },
+            { id: 'dump_half',     name: '减负',       desc: '在地面上卸掉一半以上的燃料' },
+            { id: 'save_game',     name: '存档习惯',   desc: '用 S 存一次档' },
+            { id: 'zoom_min',      name: '极目远眺',   desc: '把视野缩到最小' },
+            { id: 'fine_tune',     name: '精细操作',   desc: '用 Shift 微调过油门' },
+            { id: 'speed_300',     name: '三百俱乐部', desc: '速度达到 300 px/s' },
+            { id: 'speed_600',     name: '六百俱乐部', desc: '速度达到 600 px/s' },
+            { id: 'alt_1000',      name: '一千高空',   desc: '离地高度超过 1000 px' },
+            { id: 'alt_5000',      name: '越飞越高',   desc: '离地高度超过 5000 px' },
+            { id: 'orbit',         name: '入轨',       desc: '绕星球完整转满一圈不掉下来' },
+            { id: 'orbit3',        name: '三圈',       desc: '累计绕满三圈' },
+            { id: 'orbit5',        name: '环球旅行',   desc: '累计绕满五圈' },
+            { id: 'escape',        name: '脱离摇篮',   desc: '达到逃逸速度' },
+            { id: 'homing_cat',    name: '迷路的猫',   desc: '飞出引力范围后又自己飞回来着陆' },
+            { id: 'out_of_fuel',   name: '弹尽粮绝',   desc: '在空中把燃料烧到 0', instant: true },
+            { id: 'low_fuel_land', name: '油表见底',   desc: '燃料不到 5% 还能平安着陆' },
+            { id: 'hover_king',    name: '悬停大师',   desc: '把离地高度稳定在 200 px 附近连续 3 秒' },
+            { id: 'round_trip',    name: '环游半球',   desc: '着陆点离起飞点超过 3000 px' },
+        ];
+
+        const GRAVITY_MU = planet.surfaceGravity * planet.radius * planet.radius;
+        const achieved = new Set();
+        const pendingSettlement = [];   // 这一趟任务拿到、还没结算的成就
+        const toastQueue = [];
+        let toastCurrent = null;
+        let toastTimer = 0;
+        let achievementPanelOpen = false;
+
+        const stats = {
+            orbits: 0, sweep: 0, lastAngle: 0,
+            maxSpeed: 0, maxAlt: 0, hoverTime: 0,
+            escaped: false, dumpedFuel: 0,
+            launchX: 0, launchY: 0
+        };
+
+        // 成就记录存在浏览器里，下次打开还在
+        try {
+            const savedList = JSON.parse(localStorage.getItem('msp2d-achievements') || '[]');
+            if (Array.isArray(savedList)) savedList.forEach((id) => achieved.add(id));
+        } catch (err) { /* 浏览器不给用 localStorage 就当没存过 */ }
+
+        function saveAchievements() {
+            try { localStorage.setItem('msp2d-achievements', JSON.stringify([...achieved])); } catch (err) {}
+        }
+
+        function unlock(id) {
+            if (achieved.has(id) || pendingSettlement.some((a) => a.id === id)) return;
+            const a = achievements.find((x) => x.id === id);
+            if (!a) return;
+            // 弹尽粮绝当场就弹（不然万一回不来，永远等不到结算）
+            if (a.instant) {
+                achieved.add(id);
+                saveAchievements();
+                toastQueue.push(a);
+                return;
+            }
+            pendingSettlement.push(a);   // 其它都攒着，等着陆结算
+        }
+
+        // 着陆结算：这一趟任务里拿到的成就一次性揭晓
+        function settleMission() {
+            if (pendingSettlement.length === 0) return;
+            pendingSettlement.forEach((a) => {
+                if (achieved.has(a.id)) return;
+                achieved.add(a.id);
+                toastQueue.push({ name: a.name, desc: a.desc, title: '任 务 结 算' });
+            });
+            pendingSettlement.length = 0;
+            saveAchievements();
+        }
+
+        // 一次达成好几个的时候排队一个一个弹
+        function updateAchievementToast(dt) {
+            if (toastTimer > 0) {
+                toastTimer -= dt;
+                if (toastTimer <= 0) {
+                    achievementEl.style.opacity = '0';
+                    achievementEl.style.transform = 'translateX(-50%) translateY(-24px)';
+                    toastCurrent = null;
+                }
+                return;
+            }
+            if (toastCurrent === null && toastQueue.length > 0) {
+                toastCurrent = toastQueue.shift();
+                achievementTitleEl.innerText = toastCurrent.title || '成 就 达 成';
+                achievementNameEl.innerText = toastCurrent.name;
+                achievementDescEl.innerText = toastCurrent.desc;
+                achievementEl.style.opacity = '1';
+                achievementEl.style.transform = 'translateX(-50%) translateY(0)';
+                toastTimer = 3;
+            }
+        }
+
+        function toggleAchievementPanel() {
+            achievementPanelOpen = !achievementPanelOpen;
+            if (achievementPanelOpen) {
+                const rows = achievements.map((a) => {
+                    const got = achieved.has(a.id);
+                    return '<div class="ach-row ' + (got ? 'got' : 'locked') + '">'
+                        + '<span class="ach-mark">' + (got ? '●' : '○') + '</span>'
+                        + '<span class="ach-name">' + a.name + '</span>'
+                        + '<span class="ach-desc">' + a.desc + '</span></div>';
+                }).join('');
+                achievementPanelEl.innerHTML =
+                    '<div class="ach-head">成就　' + achieved.size + ' / ' + achievements.length + '　（按 C 关闭）</div>' + rows;
+            }
+            achievementPanelEl.style.display = achievementPanelOpen ? 'block' : 'none';
+        }
+
+        // 每个物理步都会检查一遍
+        function checkAchievements(dt) {
+            const rx = rocket.x - planet.x;
+            const ry = rocket.y - planet.y;
+            const r = Math.sqrt(rx * rx + ry * ry) || 1;
+            const alt = r - planet.radius;
+            const speed = Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
+            const ang = Math.atan2(ry, rx);
+
+            if (speed > stats.maxSpeed) stats.maxSpeed = speed;
+            if (alt > stats.maxAlt) stats.maxAlt = alt;
+            if (stats.maxSpeed >= 300) unlock('speed_300');
+            if (stats.maxSpeed >= 600) unlock('speed_600');
+            if (stats.maxAlt >= 1000) unlock('alt_1000');
+            if (stats.maxAlt >= 5000) unlock('alt_5000');
+
+            // 逃逸：能量 ≥ 0，而且必须真的是往外飞。
+            // （不然一头扎向地面的俯冲也算能量 ≥ 0，那就成"撞地逃逸"了）
+            const radialSpeed = (rocket.vx * rx + rocket.vy * ry) / r;
+            if (speed * speed / 2 - GRAVITY_MU / r >= 0 && radialSpeed > 0) {
+                stats.escaped = true;
+                unlock('escape');
+            }
+
+            if (!rocket.landed) {
+                let da = ang - stats.lastAngle;
+                while (da > Math.PI) da -= 2 * Math.PI;
+                while (da < -Math.PI) da += 2 * Math.PI;
+                stats.sweep += Math.abs(da);
+                if (stats.sweep >= Math.PI * 2) {
+                    stats.sweep -= Math.PI * 2;
+                    stats.orbits += 1;
+                    unlock('orbit');
+                    if (stats.orbits >= 3) unlock('orbit3');
+                    if (stats.orbits >= 5) unlock('orbit5');
+                }
+                // 悬停：离地 200px 上下 20px 保持 3 秒
+                if (Math.abs(alt - 200) < 20) {
+                    stats.hoverTime += dt;
+                    if (stats.hoverTime >= 3) unlock('hover_king');
+                } else {
+                    stats.hoverTime = 0;
+                }
+            } else {
+                stats.sweep = 0;
+                stats.hoverTime = 0;
+            }
+            stats.lastAngle = ang;
+        }
+
+        // 着陆参数
+        const LANDING_SPEED = 180;    // 扎向地面的速度小于它就稳稳着陆，大于它就弹一下
+        const GROUND_FRICTION = 0.85; // 贴地摩擦：停在地上时横向速度每帧乘这个数
+
+        // 日志计时器
+        let lastLogTime = 0;
+        const LOG_INTERVAL = 1000; // 每秒输出一次日志
+
+        // ==== 键盘监听（所有操作都有对应的键）====
+        // A/D 旋转、↑/↓ 油门，都用“按住”状态，在 physicsStep 里按时间处理，又快又稳
+        const keys = { left: false, right: false, throttleUp: false, throttleDown: false, fine: false, refuel: false, dump: false, zoomIn: false, zoomOut: false };
+
+        // 观战端：除了音乐、成就、协同面板，其它按键一律不生效
+        function spectatorAllows(code) {
+            return code === 'KeyM' || code === 'KeyC' || code === 'KeyT' || code === 'KeyS' || code === 'KeyL';
+        }
+
+        function onKeyDown(e) {
+            if (isSpectator() && !spectatorAllows(e.code)) return;
+            if (e.code === 'KeyA') { keys.left = true; return; }
+            if (e.code === 'KeyD') { keys.right = true; return; }
+            if (e.code === 'ArrowUp') { keys.throttleUp = true; e.preventDefault(); return; }
+            if (e.code === 'ArrowDown') { keys.throttleDown = true; e.preventDefault(); return; }
+            if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keys.fine = true; return; }
+            // 燃料：+ 加油、- 卸油（按住会持续加减）
+            if (e.code === 'Equal' || e.code === 'NumpadAdd') { keys.refuel = true; return; }
+            if (e.code === 'Minus' || e.code === 'NumpadSubtract') { keys.dump = true; return; }
+            // 缩放：[ 缩小、] 放大（按住会持续缩放）
+            if (e.code === 'BracketLeft') { keys.zoomOut = true; return; }
+            if (e.code === 'BracketRight') { keys.zoomIn = true; return; }
+            if (e.code === 'KeyC') { toggleAchievementPanel(); return; }
+            if (e.code === 'KeyM') { toggleBgm(); return; }
+            if (e.code === 'KeyT') { toggleTouchPanel(); return; }
+            if (e.repeat) return;   // 长按不重复触发下面这些，避免状态乱闪
+            if (e.code === 'KeyE') toggleEngine();
+            if (e.code === 'KeyS') saveGame();
+            if (e.code === 'KeyL') loadGame();
+        }
+
+        function onKeyUp(e) {
+            if (e.code === 'KeyA') keys.left = false;
+            if (e.code === 'KeyD') keys.right = false;
+            if (e.code === 'ArrowUp') keys.throttleUp = false;
+            if (e.code === 'ArrowDown') keys.throttleDown = false;
+            if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.fine = false;
+            if (e.code === 'Equal' || e.code === 'NumpadAdd') keys.refuel = false;
+            if (e.code === 'Minus' || e.code === 'NumpadSubtract') keys.dump = false;
+            if (e.code === 'BracketLeft') keys.zoomOut = false;
+            if (e.code === 'BracketRight') keys.zoomIn = false;
+        }
+
+        // 键盘和屏幕按键都走这两个函数，两条输入路径永远一致
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+
+        // 切走窗口时松开所有键，免得回来飞船还在自己转、油门自己往上涨
+        window.addEventListener('blur', () => {
+            keys.left = false;
+            keys.right = false;
+            keys.throttleUp = false;
+            keys.throttleDown = false;
+            keys.fine = false;
+            keys.refuel = false;
+            keys.dump = false;
+            keys.zoomIn = false;
+            keys.zoomOut = false;
+        });
+
+        // ==================== 触控按键 ====================
+        // 屏幕按键“按下” = 按下对应的键，所以键鼠和触控能做到的事完全一样
+        const touchButtons = [
+            ['t-left', 'KeyA'], ['t-right', 'KeyD'],
+            ['t-thr-up', 'ArrowUp'], ['t-thr-down', 'ArrowDown'],
+            ['t-ignite', 'KeyE'],
+            ['t-zoom-in', 'BracketRight'], ['t-zoom-out', 'BracketLeft'],
+            ['t-fuel', 'Equal'], ['t-dump', 'Minus'],
+        ];
+
+        touchButtons.forEach((pair) => {
+            const btn = document.getElementById(pair[0]);
+            if (!btn || !btn.addEventListener) return;
+            const code = pair[1];
+            const press = (ev) => {
+                if (ev && ev.preventDefault) ev.preventDefault();
+                if (isSpectator() && !spectatorAllows(code)) return;   // 观战端不能操控
+                if (btn.classList) btn.classList.add('active');
+                startBgm();     // 手机上第一次摸屏幕，顺便把音乐带起来
+                onKeyDown({ code: code, repeat: false, shiftKey: false, preventDefault() {} });
+            };
+            const release = (ev) => {
+                if (ev && ev.preventDefault) ev.preventDefault();
+                if (btn.classList) btn.classList.remove('active');
+                onKeyUp({ code: code });
+            };
+            btn.addEventListener('pointerdown', press);
+            btn.addEventListener('pointerup', release);
+            btn.addEventListener('pointercancel', release);
+            btn.addEventListener('pointerleave', release);
+            btn.addEventListener('contextmenu', (ev) => { if (ev.preventDefault) ev.preventDefault(); });
+        });
+
+        // “微调”是个开关（键盘上是按住 Shift），触控点一下就切换
+        const fineBtn = document.getElementById('t-fine');
+        if (fineBtn && fineBtn.addEventListener) {
+            fineBtn.addEventListener('pointerdown', (ev) => {
+                if (ev && ev.preventDefault) ev.preventDefault();
+                keys.fine = !keys.fine;
+                if (fineBtn.classList) {
+                    if (keys.fine) fineBtn.classList.add('active');
+                    else fineBtn.classList.remove('active');
+                }
+            });
+        }
+
+        // 触控面板：触屏设备默认打开；桌面按 T 或点右上角「触控」开关
+        const isTouchDevice = (typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0) || ('ontouchstart' in window);
+        let touchPanelOn = isTouchDevice;
+        try {
+            const savedTouch = localStorage.getItem('msp2d-touch');
+            if (savedTouch === '1') touchPanelOn = true;
+            if (savedTouch === '0') touchPanelOn = false;
+        } catch (e) {}
+
+        function applyTouchPanel() {
+            if (touchControlsEl) touchControlsEl.style.display = touchPanelOn ? 'block' : 'none';
+        }
+
+        function toggleTouchPanel() {
+            touchPanelOn = !touchPanelOn;
+            try { localStorage.setItem('msp2d-touch', touchPanelOn ? '1' : '0'); } catch (e) {}
+            applyTouchPanel();
+        }
+
+        applyTouchPanel();
+
+        // ==== 发动机状态机（冷启动已去掉：按 E 直接点火 / 关机） ====
+        function toggleEngine() {
+            if (rocket.state === 'firing') {
+                rocket.state = 'idle';        // 关机
+            } else {
+                if (rocket.landed) {
+                    unlock('first_flight');
+                    stats.launchX = rocket.x; // 记下起飞点，着陆时用来算飞了多远
+                    stats.launchY = rocket.y;
+                    stats.escaped = false;    // “迷路的猫”只算同一次飞行：逃逸了又自己回来
+                }
+                rocket.state = 'firing';      // 点火；停在星球上按就是重新起飞
+                rocket.landed = false;
+            }
+        }
+
+        // ==== 缩放（滚轮，或键盘 - / =）====
+        function zoomBy(factor) {
+            camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * factor));
+            if (camera.zoom <= camera.minZoom + 0.0001) unlock('zoom_min');
+        }
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            zoomBy(e.deltaY > 0 ? 0.9 : 1.1);
+        }, { passive: false });
+
+        // ==================== 双指捏合缩放（手机 / 触摸屏）====================
+        // 和按钮、滚轮走的是同一个 zoomBy，所以三种方式效果完全一样
+        const activePointers = new Map();   // 每根手指的当前位置
+        let pinchStartDist = 0;
+        let pinchStartZoom = 1;
+
+        function pointerDistance() {
+            const pts = [...activePointers.values()];
+            if (pts.length < 2) return 0;
+            const dx = pts[0].x - pts[1].x;
+            const dy = pts[0].y - pts[1].y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        canvas.addEventListener('pointerdown', (e) => {
+            activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (activePointers.size === 2) {
+                pinchStartDist = pointerDistance();
+                pinchStartZoom = camera.zoom;
+            }
+        });
+
+        canvas.addEventListener('pointermove', (e) => {
+            if (!activePointers.has(e.pointerId)) return;
+            activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (activePointers.size >= 2 && pinchStartDist > 0) {
+                if (e.preventDefault) e.preventDefault();
+                const ratio = pointerDistance() / pinchStartDist;
+                // 直接按手指间距的比例缩放，跟手
+                camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, pinchStartZoom * ratio));
+                if (camera.zoom <= camera.minZoom + 0.0001) unlock('zoom_min');
+            }
+        });
+
+        function endPointer(e) {
+            activePointers.delete(e.pointerId);
+            if (activePointers.size < 2) pinchStartDist = 0;
+        }
+        canvas.addEventListener('pointerup', endPointer);
+        canvas.addEventListener('pointercancel', endPointer);
+        canvas.addEventListener('pointerleave', endPointer);
+
+        // ==== 引力：平方反比（真正的轨道引力）====
+        // a = surfaceGravity × (radius / 距离)²
+        // 这里不用另外加“离心力”：我们用的是不跟着飞船转的坐标系，
+        // 只要横向速度够快，飞船就会一直“绕着、掉不到地上”—— 这就是轨道。
+        function gravityAt(x, y) {
+            const dx = planet.x - x;
+            const dy = planet.y - y;
+            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+            const safe = Math.max(dist, planet.radius * 0.5);   // 防止贴到球心时引力爆表
+            const a = planet.surfaceGravity * (planet.radius / safe) ** 2;
+            return { ax: (dx / dist) * a, ay: (dy / dist) * a, dist };
+        }
+
+        // ==== 物理更新 ====
+        function physicsStep(dt) {
+            // 旋转放在最前面：停在地上也能先转好方向，再点火起飞
+            if (keys.left) rocket.angle -= ROTATE_SPEED * dt;
+            if (keys.right) rocket.angle += ROTATE_SPEED * dt;
+            rocket.angle = ((rocket.angle % 360) + 360) % 360;
+
+            // 缩放：按住 [ / ] 持续缩放（和滚轮、双指捏合同一个 zoomBy）
+            if (keys.zoomIn || keys.zoomOut) {
+                const zoomFactor = Math.pow(1 + ZOOM_RATE_PER_SEC, dt);
+                if (keys.zoomIn) zoomBy(zoomFactor);
+                if (keys.zoomOut) zoomBy(1 / zoomFactor);
+            }
+
+            // 节流阀：按住 ↑/↓ 调油门，按住 Shift 变成微调
+            const rate = keys.fine ? THROTTLE_FINE_RATE : THROTTLE_RATE;
+            if (keys.throttleUp) rocket.throttle = Math.min(1, rocket.throttle + rate * dt);
+            if (keys.throttleDown) rocket.throttle = Math.max(0, rocket.throttle - rate * dt);
+            if (keys.fine && (keys.throttleUp || keys.throttleDown)) unlock('fine_tune');
+
+            // 加油 / 卸油：只能停在星球上的时候做（在空中按只会提醒你）
+            if (keys.refuel || keys.dump) {
+                if (rocket.landed) {
+                    if (keys.refuel) {
+                        rocket.fuel = Math.min(1, rocket.fuel + FUEL_FILL_RATE * dt);
+                        if (rocket.fuel >= 1) unlock('refuel_full');
+                    }
+                    if (keys.dump) {
+                        const before = rocket.fuel;
+                        rocket.fuel = Math.max(0, rocket.fuel - FUEL_FILL_RATE * dt);
+                        stats.dumpedFuel += before - rocket.fuel;
+                        if (stats.dumpedFuel >= 0.5) unlock('dump_half');
+                    }
+                    fuelMsgTimer = 0;
+                } else {
+                    fuelMsgTimer = 2;
+                }
+            }
+            if (fuelMsgTimer > 0) fuelMsgTimer -= dt;
+
+            // 引力
+            const g = gravityAt(rocket.x, rocket.y);
+            rocket.vx += g.ax * dt;
+            rocket.vy += g.ay * dt;
+
+            // 发动机烧燃料：油门越大烧得越快；燃料烧完就自动熄火
+            let thrusting = false;
+            if (rocket.state === 'firing' && rocket.throttle > 0) {
+                if (rocket.fuel > 0) {
+                    thrusting = true;
+                    rocket.fuel = Math.max(0, rocket.fuel - rocket.throttle * dt / FUEL_BURN_SECONDS);
+                    if (rocket.fuel <= 0) {
+                        rocket.state = 'idle';                          // 没油了，熄火
+                        if (!rocket.landed) unlock('out_of_fuel');      // 在天上烧干 = 弹尽粮绝
+                    }
+                } else {
+                    rocket.state = 'idle';
+                }
+            }
+
+            if (thrusting) {
+                // 推力沿着“船头”方向 (-cos, -sin)，大小 = 满油推力 × 油门 ÷ 当前质量。
+                // 油烧掉一半，飞船就轻了，同样油门能推得更猛 —— 这就是“燃料减少重量也减少”。
+                const a = rocket.angle * Math.PI / 180;
+                const power = thrustAccel(rocket.fuel, rocket.throttle);
+                rocket.vx += -Math.cos(a) * power * dt;
+                rocket.vy += -Math.sin(a) * power * dt;
+            }
+
+            rocket.x += rocket.vx * dt;
+            rocket.y += rocket.vy * dt;
+
+            // ==== 着陆判定（用“移动之后”的位置算） ====
+            const ndx = planet.x - rocket.x;
+            const ndy = planet.y - rocket.y;
+            const ndist = Math.sqrt(ndx*ndx + ndy*ndy);
+            const SURFACE = planet.radius + 8;
+
+            if (ndist > 0 && ndist < SURFACE) {
+                const nx = ndx / ndist;   // 从飞船指向球心的方向
+                const ny = ndy / ndist;
+
+                // 1) 先贴回地面
+                rocket.x = planet.x - nx * SURFACE;
+                rocket.y = planet.y - ny * SURFACE;
+
+                // 2) 把速度拆成“扎进地面”和“贴着地面滑”两部分
+                const intoGround = rocket.vx * nx + rocket.vy * ny;   // >0 表示正在往地里扎
+                const slideX = rocket.vx - intoGround * nx;
+                const slideY = rocket.vy - intoGround * ny;
+
+                // 结结实实砸了一下 —— 不管接下来是弹起来还是停住，都算数
+                if (intoGround > 250) unlock('hard_landing');
+
+                // 摔得狠、而且发动机没在推 → 弹一下，把大部分能量吃掉。
+                // 但如果你正点火往地里顶，就直接停住 —— 不然会一直弹个没完，永远落不下来。
+                if (intoGround > LANDING_SPEED && rocket.state !== 'firing') {
+                    // 摔得太狠：弹一下，大部分能量被吃掉
+                    rocket.vx = slideX * 0.8 - intoGround * 0.2 * nx;
+                    rocket.vy = slideY * 0.8 - intoGround * 0.2 * ny;
+                    rocket.landed = false;
+                } else {
+                    // 没点火、稳稳停在地上：扎向地面的速度归零，
+                    // 贴着地面滑的速度被摩擦慢慢磨掉，但"向外飞"的速度要留着
+                    // —— 不然停在星球上就再也起不来了。
+                    // 「向外飞」的速度原样保留（起飞靠它，不能被摩擦吃掉）；
+                    // 「贴着地面滑」的速度才吃摩擦。以前两样都乘摩擦，
+                    // 结果每帧砍掉 15% 的推力，飞船被死死粘在地上起不来。
+                    const outSpeed = Math.max(0, -intoGround);
+                    rocket.vx = slideX * GROUND_FRICTION - outSpeed * nx;
+                    rocket.vy = slideY * GROUND_FRICTION - outSpeed * ny;
+
+                    if (!rocket.landed) {
+                        rocket.landed = true;
+                        // 落地自动关机，等着按 E 重新起飞
+                        if (rocket.state === 'firing') rocket.state = 'idle';
+
+                        // ---- 着陆相关的成就 ----
+                        if (intoGround < 20) unlock('soft_landing');    // 轻轻落下
+                        if (rocket.fuel < 0.05) unlock('low_fuel_land');// 快没油了还能落回来
+                        if (stats.escaped) unlock('homing_cat');        // 飞出去又自己回来了
+                        if (Math.hypot(rocket.x - stats.launchX, rocket.y - stats.launchY) > 3000) {
+                            unlock('round_trip');                       // 落点离起飞点很远
+                        }
+                        stats.escaped = false;
+
+                        // 着陆结算：这一趟任务里拿到的成就一次性揭晓
+                        settleMission();
+                    }
+                }
+            } else {
+                // 离开地面 = 自由飞行
+                rocket.landed = false;
+            }
+
+            // 成就检查 + 弹出横幅
+            checkAchievements(dt);
+            updateAchievementToast(dt);
+        }
+
+        // ==== 轨道预测线（虚线）====
+        // 拿“当前位置 + 当前速度 + 当前发动机状态”往前算，画出未来的飞行轨迹。
+        // 一直绕着星球转 = 你入轨了；一头扎进星球 = 你会掉下去。
+        const PREDICT_SECONDS = 180;                       // 最多预测 180 秒（绕满一圈就提前收工）
+        const PREDICT_MAX_STEPS = PREDICT_SECONDS / FIXED_DT;
+        const PREDICT_SAMPLE = 3;                          // 每 3 步记一个点，够平滑
+
+        function predictPath() {
+            let px = rocket.x, py = rocket.y;
+            let pvx = rocket.vx, pvy = rocket.vy;
+            const firing = rocket.state === 'firing' && rocket.throttle > 0;
+            const thrustAngle = rocket.angle * Math.PI / 180;
+            let pfuel = rocket.fuel;   // 预测里燃料也会减少、飞船也会变轻
+            const points = [px, py];
+
+            let sweep = 0;   // 已经绕星球转过的角度
+            let prevAng = Math.atan2(py - planet.y, px - planet.x);
+
+            for (let i = 0; i < PREDICT_MAX_STEPS; i++) {
+                const g = gravityAt(px, py);
+                pvx += g.ax * FIXED_DT;
+                pvy += g.ay * FIXED_DT;
+                if (firing && pfuel > 0) {
+                    // 预测里也用当前（正在变轻的）质量，虚线才和实际轨迹对得上
+                    const pPower = thrustAccel(pfuel, rocket.throttle);
+                    pvx += -Math.cos(thrustAngle) * pPower * FIXED_DT;
+                    pvy += -Math.sin(thrustAngle) * pPower * FIXED_DT;
+                    pfuel = Math.max(0, pfuel - rocket.throttle * FIXED_DT / FUEL_BURN_SECONDS);
+                }
+                px += pvx * FIXED_DT;
+                py += pvy * FIXED_DT;
+
+                if (i % PREDICT_SAMPLE === 0) points.push(px, py);
+
+                const d = Math.hypot(px - planet.x, py - planet.y);
+                if (d < planet.radius + 8) break;              // 会撞到地面，线就画到这儿
+                if (d > planet.radius * 8) break;              // 飞得太远，不用画了
+
+                // 已经绕满一整圈就收工：这样入轨时虚线正好闭合成一个环
+                const ang = Math.atan2(py - planet.y, px - planet.x);
+                let da = ang - prevAng;
+                while (da > Math.PI) da -= 2 * Math.PI;
+                while (da < -Math.PI) da += 2 * Math.PI;
+                sweep += da;
+                prevAng = ang;
+                if (i > 300 && Math.abs(sweep) >= Math.PI * 2) break;
+            }
+            return points;
+        }
+
+        // ==== 渲染循环 ====
+        function gameLoop(now) {
+            const frameTime = (now - lastTime) / 1000;
+            lastTime = now;
+
+            if (isSpectator()) {
+                // 观战端：不跑物理，只把操控端的状态插值渲染出来
+                applyRemoteWorld();
+                accumulator = 0;
+            } else {
+                accumulator += Math.min(frameTime, 0.25);
+                while (accumulator >= FIXED_DT) {
+                    physicsStep(FIXED_DT);
+                    accumulator -= FIXED_DT;
+                }
+            }
+
+            // 和服务器同步：操控端上报，观战端拉取
+            if (netMode || !netMode) { sendState(); fetchState(); }
+
+            camera.x += (rocket.x - camera.x) * 0.1;
+            camera.y += (rocket.y - camera.y) * 0.1;
+
+            ctx.fillStyle = '#050510';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(camera.zoom, camera.zoom);
+            ctx.translate(-camera.x, -camera.y);
+
+            // 星球
+            ctx.beginPath();
+            ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#4a90d9';
+            ctx.fill();
+            ctx.strokeStyle = '#2a5f9a';
+            ctx.lineWidth = 2 / camera.zoom;
+            ctx.stroke();
+
+            // 轨道预测线（蓝色虚线，像 SFS 里那条线）
+            const path = predictPath();
+            if (path.length >= 4) {
+                ctx.save();
+                ctx.setLineDash([14 / camera.zoom, 10 / camera.zoom]);  // 除以 zoom：屏幕上看起来一样长
+                ctx.lineWidth = 2 / camera.zoom;
+                ctx.strokeStyle = 'rgba(120, 220, 255, 0.9)';
+                ctx.beginPath();
+                ctx.moveTo(path[0], path[1]);
+                for (let i = 2; i < path.length; i += 2) ctx.lineTo(path[i], path[i + 1]);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // 飞船
+            ctx.save();
+            ctx.translate(rocket.x, rocket.y);
+            ctx.rotate((rocket.angle - 90) * Math.PI / 180);
+            ctx.beginPath();
+            ctx.moveTo(0, -12);
+            ctx.lineTo(-6, 10);
+            ctx.lineTo(6, 10);
+            ctx.closePath();
+            if (rocket.state === 'firing') ctx.fillStyle = '#ffaa00';       // 点火中 = 橙色
+            else if (rocket.landed) ctx.fillStyle = '#44dd88';               // 停在星球上 = 绿色
+            else ctx.fillStyle = '#ff4444';                                  // 自由飞行 = 红色
+            ctx.fill();
+            ctx.restore();
+
+            ctx.restore();
+
+            // 星球屏幕外箭头
+            const screenX = (planet.x - camera.x) * camera.zoom + canvas.width / 2;
+            const screenY = (planet.y - camera.y) * camera.zoom + canvas.height / 2;
+            const margin = 80;
+            if (screenX < margin || screenX > canvas.width - margin || screenY < margin || screenY > canvas.height - margin) {
+                const dx = screenX - canvas.width / 2;
+                const dy = screenY - canvas.height / 2;
+                const angle = Math.atan2(dy, dx);
+                const halfW = canvas.width / 2 - margin;
+                const halfH = canvas.height / 2 - margin;
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+                const scale = Math.min(halfW / Math.abs(cos || 0.0001), halfH / Math.abs(sin || 0.0001));
+                const arrowX = canvas.width / 2 + cos * scale;
+                const arrowY = canvas.height / 2 + sin * scale;
+
+                ctx.save();
+                ctx.translate(arrowX, arrowY);
+                ctx.rotate(angle);
+                ctx.beginPath();
+                ctx.moveTo(20, 0);
+                ctx.lineTo(-10, -12);
+                ctx.lineTo(-10, 12);
+                ctx.closePath();
+                ctx.fillStyle = '#4a90d9';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+
+                ctx.fillStyle = '#4a90d9';
+                ctx.font = '14px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('星球', arrowX, arrowY + 30);
+            }
+
+            // ==== 距离计算 ====
+            const dx = rocket.x - planet.x;
+            const dy = rocket.y - planet.y;
+            const centerDist = Math.sqrt(dx*dx + dy*dy);
+            const surfaceDist = centerDist - planet.radius;
+
+            const speedNum = Math.sqrt(rocket.vx**2 + rocket.vy**2);
+            const speed = speedNum.toFixed(1);
+            // 圆轨道速度：在这个高度上“一直绕着不掉下来”需要的横向速度
+            const vCirc = planet.radius * Math.sqrt(planet.surfaceGravity / centerDist);
+            const vEsc = vCirc * Math.SQRT2;      // 逃逸速度 = 圆轨道速度 × √2（超了就会飞出引力范围）
+            let orbitHint = '';
+            if (speedNum > vEsc) orbitHint = '  ⚠️ 超过逃逸速度，要飞走了！';
+            else if (Math.abs(speedNum - vCirc) < 15) orbitHint = '  ← 差不多是圆轨道了！';
+            let statusText = rocket.landed ? '已着陆（按 E 起飞）' : '关机';
+            if (rocket.state === 'firing') statusText = '点火中';
+
+            // 观战端显示角标
+            const badge = document.getElementById('spectator-badge');
+            if (badge) badge.style.display = isSpectator() ? 'block' : 'none';
+
+            // 节流阀条（左边那根竖条）
+            throttleFill.style.height = (rocket.throttle * 100).toFixed(1) + '%';
+            throttleText.innerText = '油门 ' + Math.round(rocket.throttle * 100) + '%';
+
+            // 燃料条（右边那根）：快没油的时候变红
+            fuelFill.style.height = (rocket.fuel * 100).toFixed(1) + '%';
+            fuelFill.style.background = rocket.fuel < 0.2
+                ? 'linear-gradient(#ff7777, #cc2222)'
+                : 'linear-gradient(#66ddff, #2288cc)';
+            let fuelLine2 = '';
+            if (fuelMsgTimer > 0) fuelLine2 = '要先降落到星球上才能加油 / 卸油';
+            else if (rocket.landed) fuelLine2 = '+ 补充 / - 卸掉';
+            // 质量随燃料变化 —— 让“飞船变轻”看得见
+            const massNow = shipMass(rocket.fuel);
+            // 推重比 = 当前推力 ÷ 当前重量。这里按“贴着地面”的引力算，方便和起飞对比。
+            const twrNow = thrustAccel(rocket.fuel, 1) / planet.surfaceGravity;
+            const massTip = `质量 ${massNow.toFixed(0)}（空船 ${DRY_MASS}）· 推重比 ${twrNow.toFixed(2)}:1`
+                + (rocket.fuel < 0.999 ? `  已减重 ${(FUEL_MASS * (1 - rocket.fuel)).toFixed(0)}` : '');
+            fuelText.innerText =
+                `燃料 ${Math.round(rocket.fuel * 100)}% · 满油门还能烧 ${Math.round(rocket.fuel * FUEL_BURN_SECONDS)} 秒`
+                + '\n' + massTip
+                + (fuelLine2 ? '\n' + fuelLine2 : '');
+
+            // 当前轨道：近地点 / 远地点（就像 SFS 地图里那两个数）
+            const MU = planet.surfaceGravity * planet.radius * planet.radius;
+            const v2 = rocket.vx * rocket.vx + rocket.vy * rocket.vy;
+            const energy = v2 / 2 - MU / centerDist;
+            let orbitLine;
+            if (rocket.landed) {
+                orbitLine = '轨道: 停在地面上';
+            } else if (energy >= 0) {
+                orbitLine = '轨道: 已逃逸，要飞出引力范围了 ⚠️';
+            } else {
+                const hAng = dx * rocket.vy - dy * rocket.vx;   // 角动量
+                const a = -MU / (2 * energy);                   // 轨道半长轴
+                const ecc = Math.sqrt(Math.max(0, 1 + 2 * energy * hAng * hAng / (MU * MU)));
+                const rp = a * (1 - ecc) - planet.radius;
+                const ra = a * (1 + ecc) - planet.radius;
+                orbitLine = `近地点: ${Math.round(rp)} px | 远地点: ${Math.round(ra)} px` + (rp < 0 ? '  ← 会撞上星球' : '');
+            }
+
+            hud.innerText =
+                `速度: ${speed} | 状态: ${statusText} | 角度: ${Math.round(rocket.angle)}° | 缩放: ${camera.zoom.toFixed(2)}x\n` +
+                `距离表面: ${surfaceDist.toFixed(1)} px | 距离球心: ${centerDist.toFixed(1)} px\n` +
+                orbitLine + '\n' +
+                `圆轨道速度: ${vCirc.toFixed(0)} px/s | 逃逸速度: ${vEsc.toFixed(0)} px/s` + orbitHint + '\n' +
+                `质量: ${shipMass(rocket.fuel).toFixed(0)} | 加速度: ${thrustAccel(rocket.fuel, rocket.throttle).toFixed(1)} px/s²` + '\n' +
+                `已绕: ${stats.orbits} 圈 | 成就: ${achieved.size} / ${achievements.length}（按 C 查看） | 音乐: ${bgmMuted ? '关' : '开'}` + '\n' +
+                coopLine();
+
+            // ==== 终端日志（每秒输出一次） ====
+            if (now - lastLogTime > LOG_INTERVAL) {
+                lastLogTime = now;
+                console.log(
+                    `[${new Date().toLocaleTimeString()}] ` +
+                    `状态=${statusText} | 速度=${speed} | 角度=${Math.round(rocket.angle)}° | ` +
+                    `距离表面=${surfaceDist.toFixed(1)} | 坐标=(${rocket.x.toFixed(1)}, ${rocket.y.toFixed(1)})`
+                );
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 观战端在 HUD 上显示自己的角色
+        function coopLine() {
+            if (!netMode) return '单机模式';
+            const role = isSpectator() ? '观战' : '操控';
+            let line = `协同: ${role} | 在线 ${onlineCount} 端`;
+            if (isSpectator()) line += '（你只能看，服主可把操控权交给你）';
+            return line;
+        }
+
+        function showCoopInfo() {
+            const role = !netMode ? "单机" : (isSpectator() ? "观战" : "操控");
+            let msg = `当前模式：${role}\n在线端数：${netMode ? onlineCount : 1}`;
+            if (netMode && isSpectator()) msg += "\n\n你现在是观战端，画面跟着操控端走。\n想自己操作？让服主在管理面板里把你设成「操控」。";
+            if (netMode && !isSpectator()) msg += "\n\n你现在是操控端，其他端都在看你的操作。";
+            if (!netMode) msg += "\n\n（没连上服务器，现在是本地单机模式）";
+            if (isAdmin) msg += "\n\n你是服主，管理面板：http://localhost:" + location.port + "/admin";
+            alert(msg);
+        }
+
+        // 游戏主循环启动 + 和服务器建立协同
+        requestAnimationFrame(gameLoop);
+        pollControl();
+        setInterval(pollControl, CTRL_INTERVAL_MS);
+
+        // ==== 存档/读档 ====
+        function saveGame() {
+            unlock('save_game');
+            const data = { planet, rocket, camera };
+            fetch('/api/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+                .then(res => {
+                    if (!res.ok) throw new Error('服务器返回 ' + res.status);
+                    return res.json();
+                })
+                .then(() => alert('存档成功！'))
+                .catch(err => {
+                    console.error('[存档] 失败', err);
+                    alert('存档失败：' + err.message + '\n请确认是用 python server.py 启动的（不要直接双击 html）');
+                });
+        }
+
+        function loadGame() {
+            fetch('/api/load')
+                .then(res => {
+                    if (!res.ok) throw new Error('服务器返回 ' + res.status);
+                    return res.json();
+                })
+                .then(data => {
+                    if (!data || !data.rocket) {
+                        alert('没有找到存档！');
+                        return;
+                    }
+                    Object.assign(rocket, data.rocket);
+                    if (data.planet) Object.assign(planet, data.planet);
+                    if (data.camera) Object.assign(camera, data.camera);
+                    // 老存档里是旧的引力字段（gravity、一次反比），这里补成新的平方反比参数
+                    if (typeof planet.surfaceGravity !== 'number') planet.surfaceGravity = 37.3;
+                    if ('gravity' in planet) delete planet.gravity;
+                    // 兼容老存档：以前有“冷启动 cold”和“传送中 teleporting”，现在都没了
+                    if (rocket.state === 'cold') rocket.state = 'firing';
+                    if (typeof rocket.landed !== 'boolean') rocket.landed = false;
+                    if (typeof rocket.throttle !== 'number') rocket.throttle = 1;
+                    rocket.throttle = Math.max(0, Math.min(1, rocket.throttle));
+                    if (typeof rocket.fuel !== 'number') rocket.fuel = 1;
+                    rocket.fuel = Math.max(0, Math.min(1, rocket.fuel));
+                    delete rocket.thrustPower;   // 老存档里的固定推力已经不用了（现在按质量算）
+                    if (typeof rocket.teleporting === 'boolean') delete rocket.teleporting;
+                    rocket.angle = ((rocket.angle % 360) + 360) % 360;
+                    camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom));
+                    alert('读档成功！');
+                })
+                .catch(err => {
+                    console.error('[读档] 失败', err);
+                    alert('读档失败：' + err.message);
+                });
+        }
+    </script>
+</body>
+</html>
