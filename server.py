@@ -15,6 +15,7 @@ ADMIN_TOKEN = "msp2d-admin"
 # 以“本文件所在目录”为基准：双击运行、或在别的目录里运行，都能找到网页和存档
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAVE_PATH = os.path.join(BASE_DIR, "savegame.json")
+SHIP_PATH = os.path.join(BASE_DIR, "ship.json")   # 造船厂造的飞船
 
 # ==================== 多端协同（服主分配操控 / 观战）====================
 # 核心思路：操控端算物理，每 100ms 把飞船状态报上来；
@@ -375,11 +376,50 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+    # ---------- 飞船（造船厂产物）----------
+    def handle_ship_get(self):
+        """play-main.html 读飞船；没有就返回空，前端会用默认船"""
+        _touch(self._client_id(), self.client_address[0])
+        if not os.path.exists(SHIP_PATH):
+            self.send_json({"ok": True, "ship": None})
+            return
+        try:
+            with open(SHIP_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"[飞船] 读取失败: {e}")
+            self.send_json({"ok": True, "ship": None})
+            return
+        self.send_json({"ok": True, "ship": data})
+
+    def handle_ship_post(self):
+        """build.html 保存飞船"""
+        _touch(self._client_id(), self.client_address[0])
+        body = self._read_body()
+        if not isinstance(body, dict) or not isinstance(body.get("parts"), list):
+            self.send_json({"ok": False, "error": "bad-ship"}, status=400)
+            return
+        tmp = SHIP_PATH + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(body, f, ensure_ascii=False)
+            os.replace(tmp, SHIP_PATH)
+        except OSError as e:
+            print(f"[飞船] 保存失败: {e}")
+            self.send_json({"ok": False, "error": "write-failed"}, status=500)
+            return
+        n = len(body["parts"])
+        print(f"[{time.strftime('%H:%M:%S')}] [飞船] 已保存 {body.get('name', '无名')}（{n} 个部件）")
+        self.send_json({"ok": True, "parts": n})
+
     # ---------- 读档 ----------
     def do_GET(self):
         route = self.path.split("?")[0]
         if route == "/api/load":
             self.handle_load()
+            return
+        if route == "/api/ship":
+            self.handle_ship_get()
             return
         if route == "/api/ctrl":
             self.handle_ctrl()
@@ -418,6 +458,9 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         route = self.path.split("?")[0]
         if route == "/api/save":
             self.handle_save()
+            return
+        if route == "/api/ship":
+            self.handle_ship_post()
             return
         if route == "/api/state":
             self.handle_state_post()

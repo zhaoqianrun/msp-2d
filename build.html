@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MSP2D - 造船厂</title>
+<style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+        margin: 0; background: #070b14; color: #cfe2f7; overflow: hidden;
+        font-family: 'Segoe UI', monospace, sans-serif;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ===== 顶部工具条 ===== */
+    #topbar {
+        position: absolute; top: 0; left: 0; right: 0; height: 52px; z-index: 5;
+        display: flex; align-items: center; gap: 10px; padding: 0 14px;
+        background: rgba(10, 18, 32, 0.94); border-bottom: 1px solid #1e3050;
+    }
+    #topbar .title { color: #4a90d9; letter-spacing: 3px; font-size: 15px; margin-right: 8px; }
+    .tbtn {
+        padding: 8px 14px; font-size: 13px; font-family: inherit; cursor: pointer;
+        background: #16233a; color: #cfe2f7; border: 1px solid #35506e; border-radius: 8px;
+        touch-action: manipulation;
+    }
+    .tbtn:hover { background: #1e3050; }
+    .tbtn.on { background: #2a6db5; border-color: #4a90d9; color: #fff; }
+    .tbtn.go { background: #1d5c33; border-color: #35a05e; color: #c8ffd8; }
+    .tbtn.go:hover { background: #247040; }
+    .tbtn.danger { border-color: #8a3a3a; color: #ff9a9a; }
+    #topbar .spacer { flex: 1; }
+    #shipname {
+        background: #101a2c; border: 1px solid #2c4468; border-radius: 6px;
+        color: #cfe2f7; font-family: inherit; font-size: 13px; padding: 7px 10px; width: 160px;
+    }
+
+    /* ===== 左侧部件库 ===== */
+    #parts {
+        position: absolute; top: 52px; left: 0; bottom: 0; width: 176px; z-index: 4;
+        background: rgba(10, 18, 32, 0.93); border-right: 1px solid #1e3050;
+        padding: 12px 10px; overflow-y: auto;
+    }
+    #parts h3 { color: #6b86a6; font-size: 12px; font-weight: normal; letter-spacing: 2px; margin: 0 0 10px; }
+    .part-card {
+        display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+        padding: 9px 10px; cursor: pointer; border-radius: 8px;
+        background: #101a2c; border: 1px solid #24395a; touch-action: manipulation;
+    }
+    .part-card:hover { background: #16233a; border-color: #4a90d9; }
+    .part-card .swatch { width: 26px; height: 26px; border-radius: 5px; flex: none; }
+    .part-card .meta { line-height: 1.35; }
+    .part-card .pname { font-size: 13px; }
+    .part-card .pinfo { font-size: 11px; color: #6b86a6; }
+
+    /* ===== 建造画布 ===== */
+    #stage { position: absolute; top: 52px; left: 176px; right: 0; bottom: 0; touch-action: none; }
+    #grid { position: absolute; inset: 0; }
+
+    /* ===== 右下角数据面板 ===== */
+    #stats {
+        position: absolute; right: 14px; bottom: 14px; z-index: 4;
+        background: rgba(10, 18, 32, 0.94); border: 1px solid #24395a;
+        border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.9;
+        min-width: 210px;
+    }
+    #stats .k { color: #6b86a6; display: inline-block; width: 84px; }
+    #stats .v { color: #dce8f7; }
+    #stats .warn { color: #ff9a9a; }
+    #stats .ok { color: #7fe0a8; }
+
+    /* ===== 底部提示 ===== */
+    #hint {
+        position: absolute; left: 190px; bottom: 14px; z-index: 4;
+        color: #5a6b80; font-size: 12px; line-height: 1.7; pointer-events: none;
+    }
+
+    /* ===== 右下角操作按钮（手机）===== */
+    #actions { position: absolute; right: 14px; bottom: 168px; z-index: 4; display: flex; flex-direction: column; gap: 8px; }
+    #actions .tbtn { text-align: center; }
+
+    @media (max-width: 700px) {
+        #parts { width: 132px; padding: 8px 6px; }
+        #stage { left: 132px; }
+        .part-card { padding: 7px 6px; gap: 7px; }
+        .part-card .swatch { width: 20px; height: 20px; }
+        .part-card .pname { font-size: 12px; }
+        .part-card .pinfo { font-size: 10px; }
+        #stats { font-size: 11px; padding: 9px 11px; min-width: 168px; }
+        #stats .k { width: 68px; }
+        #hint { display: none; }
+        #shipname { width: 104px; font-size: 12px; padding: 6px 8px; }
+        .tbtn { padding: 7px 10px; font-size: 12px; }
+    }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+    <span class="title">造 船 厂</span>
+    <input id="shipname" maxlength="20" placeholder="飞船名字">
+    <button class="tbtn on" id="btn-mirror">镜像对称：开</button>
+    <button class="tbtn" id="btn-clear">清空</button>
+    <span class="spacer"></span>
+    <button class="tbtn" id="btn-menu">主菜单</button>
+    <button class="tbtn go" id="btn-fly">试飞</button>
+</div>
+
+<div id="parts">
+    <h3>部 件 库</h3>
+    <div id="part-list"></div>
+</div>
+
+<div id="stage">
+    <canvas id="grid"></canvas>
+</div>
+
+<div id="actions">
+    <button class="tbtn" id="btn-undo">撤销</button>
+    <button class="tbtn danger" id="btn-del">删除选中</button>
+</div>
+
+<div id="stats"></div>
+<div id="hint">
+    点左边的部件 → 再点画布放下　·　拖动已放置的部件可以移动　·　点部件选中后按「删除选中」<br>
+    镜像对称打开时，放在中轴右边的部件会自动在左边生成一个
+</div>
+
+<script>
+// ============================================================
+//  部件定义 —— play-main.html 里有一份一样的（两边必须一致）
+// ============================================================
+const PART_TYPES = {
+    capsule: {
+        name: '控制舱', w: 2, h: 2, mass: 30, fuel: 0, thrust: 0,
+        body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9',
+        info: '驾驶它。必须有',
+    },
+    tank: {
+        name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
+        body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800',
+        info: '装燃料 +40',
+    },
+    engine: {
+        name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 80000,
+        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544',
+        info: '推力 12000',
+    },
+};
+
+const GRID = 20;              // 一格多少像素
+const MAX_PARTS = 60;
+const SHIP_KEY = 'msp2d-ship';
+
+// ============================================================
+//  船的存档
+// ============================================================
+function defaultShip() {
+    return {
+        version: 1,
+        name: '我的第一艘船',
+        parts: [
+            { id: 'd1', type: 'engine',  x: 0,  y: 0 },
+            { id: 'd2', type: 'tank',    x: 0,  y: 2 },
+            { id: 'd3', type: 'capsule', x: 0,  y: 5 },
+        ],
+    };
+}
+
+let ship = loadShip();
+
+function loadShip() {
+    try {
+        const raw = localStorage.getItem(SHIP_KEY);
+        if (!raw) return defaultShip();
+        const s = JSON.parse(raw);
+        if (!s || !Array.isArray(s.parts)) return defaultShip();
+        // 过滤掉不认识的部件类型
+        s.parts = s.parts.filter(p => p && PART_TYPES[p.type]);
+        if (s.parts.length === 0) return defaultShip();
+        return s;
+    } catch (e) { return defaultShip(); }
+}
+
+function saveShip() {
+    try { localStorage.setItem(SHIP_KEY, JSON.stringify(ship)); } catch (e) {}
+}
+
+// ============================================================
+//  派生数据
+// ============================================================
+function shipStats(s) {
+    let dryMass = 0, fuelCap = 0, thrust = 0;
+    const count = { capsule: 0, tank: 0, engine: 0 };
+    for (const p of s.parts) {
+        const t = PART_TYPES[p.type];
+        if (!t) continue;
+        dryMass += t.mass;
+        fuelCap += t.fuel;
+        thrust += t.thrust;
+        count[p.type] += 1;
+    }
+    const fullMass = dryMass + fuelCap;      // 燃料质量按 1:1 算
+    return { dryMass, fuelCap, thrust, fullMass, count };
+}
+
+function validateShip(s) {
+    const st = shipStats(s);
+    if (s.parts.length === 0) return { ok: false, msg: '船是空的，先放点部件' };
+    if (s.parts.length > MAX_PARTS) return { ok: false, msg: `部件太多了（${s.parts.length} > ${MAX_PARTS}）` };
+    if (st.count.capsule < 1) return { ok: false, msg: '要有控制舱才能驾驶' };
+    if (st.count.engine < 1) return { ok: false, msg: '要有发动机才能飞' };
+    if (st.thrust <= 0) return { ok: false, msg: '发动机没有推力' };
+    return { ok: true, msg: '' };
+}
+
+// ============================================================
+//  画布
+// ============================================================
+const canvas = document.getElementById('grid');
+const ctx = canvas.getContext('2d');
+let view = { w: 0, h: 0, dpr: 1 };
+
+function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth || canvas.parentElement.clientWidth;
+    const h = canvas.clientHeight || canvas.parentElement.clientHeight;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    view = { w, h, dpr };
+    draw();
+}
+window.addEventListener('resize', resize);
+
+// 网格坐标（格）↔ 屏幕像素
+// 原点：中轴在画布中心偏上一点，y=0（发动机底面）在下方
+let origin = { x: 0, y: 0 };
+
+function recomputeOrigin() {
+    origin.x = Math.round(view.w / 2 / GRID) * GRID;
+    origin.y = view.h - 90;
+}
+function g2p(gx, gy) { return { x: origin.x + gx * GRID, y: origin.y - gy * GRID }; }
+function p2g(px, py) { return { x: Math.round((px - origin.x) / GRID), y: Math.round((origin.y - py) / GRID) }; }
+
+function partRect(p) {
+    const t = PART_TYPES[p.type];
+    // (x, y) 是部件的左下角
+    const bl = g2p(p.x, p.y);
+    return { x: bl.x, y: bl.y - t.h * GRID, w: t.w * GRID, h: t.h * GRID };
+}
+
+function draw() {
+    recomputeOrigin();
+    ctx.clearRect(0, 0, view.w, view.h);
+
+    // 背景
+    ctx.fillStyle = '#070b14';
+    ctx.fillRect(0, 0, view.w, view.h);
+
+    // 网格
+    ctx.strokeStyle = 'rgba(74, 144, 217, 0.10)';
+    ctx.lineWidth = 1;
+    for (let x = origin.x % GRID; x < view.w; x += GRID) {
+        ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, view.h); ctx.stroke();
+    }
+    for (let y = origin.y % GRID; y < view.h; y += GRID) {
+        ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(view.w, y + 0.5); ctx.stroke();
+    }
+
+    // 中轴
+    ctx.strokeStyle = 'rgba(74, 144, 217, 0.45)';
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath(); ctx.moveTo(origin.x + 0.5, 0); ctx.lineTo(origin.x + 0.5, view.h); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 发射台地面
+    ctx.strokeStyle = '#2c4468'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, origin.y + 0.5); ctx.lineTo(view.w, origin.y + 0.5); ctx.stroke();
+
+    // 部件
+    for (const p of ship.parts) drawPart(p, p === selected);
+
+    // 放置预览
+    if (ghost) {
+        const r = partRect({ type: ghost.type, x: ghost.x, y: ghost.y });
+        const t = PART_TYPES[ghost.type];
+        ctx.globalAlpha = ghost.valid ? 0.45 : 0.2;
+        ctx.fillStyle = ghost.valid ? t.body : '#ff4444';
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = ghost.valid ? '#4a90d9' : '#ff4444';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+        ctx.setLineDash([]);
+    }
+}
+
+function roundRect(c, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+}
+
+// 每个部件的画法（play-main.html 里用同一套，只是尺寸不同）
+function drawPart(p, isSelected) {
+    const t = PART_TYPES[p.type];
+    const r = partRect(p);
+    ctx.save();
+
+    if (p.type === 'capsule') {
+        // 控制舱：圆角 + 小窗
+        const grad = ctx.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h);
+        grad.addColorStop(0, '#f0f5fb'); grad.addColorStop(1, t.body);
+        roundRect(ctx, r.x, r.y, r.w, r.h, 5);
+        ctx.fillStyle = grad; ctx.fill();
+        ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5; ctx.stroke();
+        // 舷窗
+        ctx.beginPath();
+        ctx.arc(r.x + r.w / 2, r.y + r.h * 0.38, r.w * 0.17, 0, Math.PI * 2);
+        ctx.fillStyle = t.accent; ctx.fill();
+        ctx.strokeStyle = '#2b5f96'; ctx.lineWidth = 1; ctx.stroke();
+
+    } else if (p.type === 'tank') {
+        // 燃料箱：竖条纹 + 液位线
+        const grad = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+        grad.addColorStop(0, '#cfd9e4'); grad.addColorStop(0.35, t.body); grad.addColorStop(1, '#b9c6d4');
+        roundRect(ctx, r.x, r.y, r.w, r.h, 4);
+        ctx.fillStyle = grad; ctx.fill();
+        ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5; ctx.stroke();
+        // 橙色警示带（表示这是油箱）
+        ctx.fillStyle = t.accent;
+        const bandH = Math.max(3, r.h * 0.07);
+        ctx.fillRect(r.x + 2, r.y + r.h * 0.32, r.w - 4, bandH);
+        ctx.fillRect(r.x + 2, r.y + r.h * 0.60, r.w - 4, bandH);
+
+    } else if (p.type === 'engine') {
+        // 发动机：上方圆柱 + 下方喷口
+        const bodyH = r.h * 0.58;
+        const grad = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+        grad.addColorStop(0, '#6f7b89'); grad.addColorStop(0.4, t.body); grad.addColorStop(1, '#616c78');
+        roundRect(ctx, r.x, r.y, r.w, bodyH, 3);
+        ctx.fillStyle = grad; ctx.fill();
+        ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5; ctx.stroke();
+        // 喷口（梯形）
+        ctx.beginPath();
+        ctx.moveTo(r.x + r.w * 0.22, r.y + bodyH);
+        ctx.lineTo(r.x + r.w * 0.78, r.y + bodyH);
+        ctx.lineTo(r.x + r.w * 0.92, r.y + r.h);
+        ctx.lineTo(r.x + r.w * 0.08, r.y + r.h);
+        ctx.closePath();
+        ctx.fillStyle = '#4e5863'; ctx.fill();
+        ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5; ctx.stroke();
+        // 喷口内壁
+        ctx.beginPath();
+        ctx.moveTo(r.x + r.w * 0.32, r.y + bodyH + 2);
+        ctx.lineTo(r.x + r.w * 0.68, r.y + bodyH + 2);
+        ctx.lineTo(r.x + r.w * 0.78, r.y + r.h - 1);
+        ctx.lineTo(r.x + r.w * 0.22, r.y + r.h - 1);
+        ctx.closePath();
+        ctx.fillStyle = '#2b323a'; ctx.fill();
+    }
+
+    // 选中高亮
+    if (isSelected) {
+        ctx.strokeStyle = '#ffc35c'; ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6);
+        ctx.setLineDash([]);
+    }
+    ctx.restore();
+}
+
+// ============================================================
+//  交互
+// ============================================================
+let placing = null;      // 正在放置的部件类型
+let selected = null;     // 选中的部件对象
+let dragging = null;     // 正在拖动的部件
+let dragOffset = { x: 0, y: 0 };
+let ghost = null;        // 放置预览
+let mirror = true;
+let history = [];        // 撤销栈
+
+function pushHistory() {
+    history.push(JSON.stringify(ship.parts));
+    if (history.length > 40) history.shift();
+}
+
+function overlaps(type, gx, gy, ignoreId) {
+    const t = PART_TYPES[type];
+    const a = { x1: gx, y1: gy, x2: gx + t.w, y2: gy + t.h };
+    for (const p of ship.parts) {
+        if (p.id === ignoreId) continue;
+        const pt = PART_TYPES[p.type];
+        const b = { x1: p.x, y1: p.y, x2: p.x + pt.w, y2: p.y + pt.h };
+        if (a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1) return true;
+    }
+    return false;
+}
+
+function canPlace(type, gx, gy, ignoreId) {
+    if (gy < 0) return false;                         // 不能埋到地面以下
+    if (overlaps(type, gx, gy, ignoreId)) return false;
+    return true;
+}
+
+function addPart(type, gx, gy) {
+    if (ship.parts.length >= MAX_PARTS) { toast(`部件最多 ${MAX_PARTS} 个`); return; }
+    const t = PART_TYPES[type];
+    pushHistory();
+    ship.parts.push({ id: 'p' + Date.now() + Math.floor(Math.random() * 1000), type, x: gx, y: gy });
+    // 镜像：把落在中轴右侧的部件在左侧复制一份
+    if (mirror && gx > 0) {
+        const mx = -gx - t.w;
+        if (canPlace(type, mx, gy, null)) {
+            ship.parts.push({ id: 'p' + Date.now() + Math.floor(Math.random() * 1000) + 'm', type, x: mx, y: gy });
+        }
+    } else if (mirror && gx < 0) {
+        const mx = -gx - t.w;
+        if (canPlace(type, mx, gy, null)) {
+            ship.parts.push({ id: 'p' + Date.now() + Math.floor(Math.random() * 1000) + 'm', type, x: mx, y: gy });
+        }
+    }
+    saveShip();
+    updateStats();
+    draw();
+}
+
+function removePart(p) {
+    pushHistory();
+    ship.parts = ship.parts.filter(x => x !== p);
+    if (selected === p) selected = null;
+    saveShip();
+    updateStats();
+    draw();
+}
+
+function pointerPos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function hitTest(px, py) {
+    for (let i = ship.parts.length - 1; i >= 0; i--) {
+        const p = ship.parts[i];
+        const r = partRect(p);
+        if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return p;
+    }
+    return null;
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+    const pos = pointerPos(e);
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+
+    if (placing) {
+        const g = p2g(pos.x, pos.y);
+        const t = PART_TYPES[placing];
+        // 让部件中心落在指针上
+        const gx = g.x - Math.floor(t.w / 2);
+        const gy = g.y - Math.floor(t.h / 2);
+        if (canPlace(placing, gx, gy, null)) {
+            addPart(placing, gx, gy);
+        } else {
+            toast('这里放不下');
+        }
+        return;
+    }
+
+    const hit = hitTest(pos.x, pos.y);
+    if (hit) {
+        selected = hit;
+        dragging = hit;
+        const r = partRect(hit);
+        dragOffset = { x: pos.x - r.x, y: pos.y - r.y };
+        draw();
+    } else {
+        selected = null;
+        draw();
+    }
+});
+
+canvas.addEventListener('pointermove', (e) => {
+    const pos = pointerPos(e);
+
+    if (placing) {
+        const g = p2g(pos.x, pos.y);
+        const t = PART_TYPES[placing];
+        const gx = g.x - Math.floor(t.w / 2);
+        const gy = g.y - Math.floor(t.h / 2);
+        ghost = { type: placing, x: gx, y: gy, valid: canPlace(placing, gx, gy, null) };
+        draw();
+        return;
+    }
+
+    if (dragging) {
+        const t = PART_TYPES[dragging.type];
+        const gx = Math.round((pos.x - dragOffset.x - origin.x) / GRID);
+        const gy = Math.round((origin.y - (pos.y - dragOffset.y) - t.h * GRID) / GRID);
+        if (canPlace(dragging.type, gx, gy, dragging.id)) {
+            dragging.x = gx; dragging.y = gy;
+            saveShip();
+            draw();
+        }
+    }
+});
+
+function endPointer() {
+    if (dragging) { updateStats(); }
+    dragging = null;
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+
+// ============================================================
+//  界面
+// ============================================================
+const partListEl = document.getElementById('part-list');
+for (const [key, t] of Object.entries(PART_TYPES)) {
+    const card = document.createElement('div');
+    card.className = 'part-card';
+    card.innerHTML = '<span class="swatch" style="background:' + t.body + ';border:2px solid ' + t.edge + '"></span>'
+        + '<span class="meta"><span class="pname">' + t.name + '</span><br>'
+        + '<span class="pinfo">' + t.w + '×' + t.h + '　质量 ' + t.mass + (t.fuel ? '　燃料 +' + t.fuel : '') + (t.thrust ? '　推力 ' + t.thrust : '') + '</span></span>';
+    card.addEventListener('click', () => {
+        placing = (placing === key) ? null : key;
+        ghost = null;
+        document.querySelectorAll('.part-card').forEach(c => c.style.background = '');
+        if (placing) { card.style.background = '#1e3a5c'; toast('点画布放下「' + t.name + '」'); }
+        draw();
+    });
+    partListEl.appendChild(card);
+}
+
+const statsEl = document.getElementById('stats');
+function updateStats() {
+    const st = shipStats(ship);
+    const v = validateShip(ship);
+    const twr = st.thrust / st.fullMass / 200;   // 引力 200
+    const rows = [
+        ['控制舱', st.count.capsule + ' 个' + (st.count.capsule ? '' : ' ← 需要')],
+        ['燃料箱', st.count.tank + ' 个'],
+        ['发动机', st.count.engine + ' 个' + (st.count.engine ? '' : ' ← 需要')],
+        ['空船质量', st.dryMass.toFixed(0)],
+        ['燃料容量', st.fuelCap.toFixed(0)],
+        ['满油质量', st.fullMass.toFixed(0)],
+        ['总推力', st.thrust.toFixed(0)],
+        ['推重比', twr.toFixed(2) + ':1'],
+        ['部件数', ship.parts.length + ' / ' + MAX_PARTS],
+    ];
+    statsEl.innerHTML = rows.map(([k, val]) => '<div><span class="k">' + k + '</span><span class="v">' + val + '</span></div>').join('')
+        + '<div style="margin-top:6px" class="' + (v.ok ? 'ok' : 'warn') + '">' + (v.ok ? '可以发射' : v.msg) + '</div>';
+}
+
+let toastTimer = null;
+function toast(msg) {
+    let el = document.getElementById('toast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'toast';
+        el.style.cssText = 'position:absolute;top:66px;left:50%;transform:translateX(-50%);z-index:9;'
+            + 'background:rgba(10,20,40,.95);border:1px solid #4a90d9;border-radius:8px;'
+            + 'padding:9px 20px;color:#cfe2f7;font-size:13px;pointer-events:none;opacity:0;transition:opacity .25s';
+        document.body.appendChild(el);
+    }
+    el.innerText = msg;
+    el.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
+}
+
+// 顶部按钮
+const mirrorBtn = document.getElementById('btn-mirror');
+mirrorBtn.addEventListener('click', () => {
+    mirror = !mirror;
+    mirrorBtn.className = 'tbtn' + (mirror ? ' on' : '');
+    mirrorBtn.innerText = '镜像对称：' + (mirror ? '开' : '关');
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+    if (!confirm('清空整艘船？')) return;
+    pushHistory();
+    ship.parts = [];
+    selected = null;
+    saveShip(); updateStats(); draw();
+});
+
+document.getElementById('btn-undo').addEventListener('click', () => {
+    if (history.length === 0) { toast('没有可撤销的操作'); return; }
+    ship.parts = JSON.parse(history.pop());
+    selected = null;
+    saveShip(); updateStats(); draw();
+    toast('已撤销');
+});
+
+document.getElementById('btn-del').addEventListener('click', () => {
+    if (!selected) { toast('先点一下要删除的部件'); return; }
+    removePart(selected);
+});
+
+document.getElementById('shipname').addEventListener('input', (e) => {
+    ship.name = e.target.value;
+    saveShip();
+});
+
+document.getElementById('btn-menu').addEventListener('click', () => { location.href = 'index.html'; });
+
+document.getElementById('btn-fly').addEventListener('click', async () => {
+    const v = validateShip(ship);
+    if (!v.ok) { toast(v.msg); return; }
+    saveShip();
+    // 也存到服务器一份，play-main.html 从服务器读（这样手机造的船电脑也能飞）
+    try {
+        await fetch('/api/ship', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ship),
+        });
+    } catch (e) { /* 没有服务器也能用 localStorage 试飞 */ }
+    location.href = 'play-main.html';
+});
+
+// 键盘快捷键
+window.addEventListener('keydown', (e) => {
+    if (e.target === document.getElementById('shipname')) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selected) { e.preventDefault(); removePart(selected); }
+    }
+    if (e.key === 'Escape') { placing = null; ghost = null; selected = null; draw(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        document.getElementById('btn-undo').click();
+    }
+});
+
+// ============================================================
+//  启动
+// ============================================================
+document.getElementById('shipname').value = ship.name || '';
+resize();
+updateStats();
+// 画布尺寸要等布局完成
+setTimeout(resize, 50);
+</script>
+</body>
+</html>
