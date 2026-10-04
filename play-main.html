@@ -470,9 +470,40 @@
                 centerX: cx,                     // 船的中轴（格坐标）
                 bottomY: minY,                   // 最底下（发动机喷口）
                 corners: null,                   // 下面填
+                com: { x: 0, y: 0 },             // 质心（本地像素坐标）
             };
             spec.corners = shipCollisionPoints(def, spec);
+            spec.com = shipCenterOfMass(def, spec);
             return spec;
+        }
+
+        // ==================== 质心（重心）====================
+        // 航天器应该绕自己的重心旋转，而不是绕控制舱、也不是绕船底。
+        // 做法：每个部件的质量放在它自己的几何中心上，加权平均。
+        //   燃料算在燃料箱里 —— 所以油烧掉后，重心会往船头方向偏。
+        function shipCenterOfMass(def, spec, fuelRatio) {
+            const P = PART_PX;
+            const fr = (typeof fuelRatio === 'number') ? fuelRatio : 1;   // 默认按满油算
+            const cx = spec.centerX;
+            const bottom = spec.box.maxY;
+            let mx = 0, my = 0, total = 0;
+
+            for (const p of def.parts) {
+                const t = PART_TYPES[p.type];
+                if (!t) continue;
+                // 部件质量：燃料箱里有多少油，就算多少燃料质量（质量随燃料减少）
+                const partFuel = t.fuel * fr;
+                const m = t.mass + partFuel;
+                if (m <= 0) continue;
+                // 部件几何中心（本地像素：x 以中轴为 0，y 以底面为 0、向上为负）
+                const px = (p.x + t.w / 2 - cx) * P;
+                const py = (bottom - (p.y + t.h / 2)) * P;
+                mx += px * m;
+                my += py * m;
+                total += m;
+            }
+            if (total <= 0) return { x: 0, y: 0 };
+            return { x: mx / total, y: my / total };
         }
 
         // ==================== 碰撞箱 ====================
@@ -513,11 +544,15 @@
         }
 
         // 把船的本地坐标点转到世界坐标（考虑位置和旋转）
+        // 本地坐标（以船底中轴为原点）→ 世界坐标
+        // 旋转中心是「质心」：先把点相对于质心摆好，再转，再平移回去。
         function shipPointWorld(lx, ly, angleDeg) {
             const a = (angleDeg - 90) * Math.PI / 180;   // 和绘制用的是同一个旋转
             const cos = Math.cos(a), sin = Math.sin(a);
-            return { x: rocket.x + lx * cos - ly * sin,
-                     y: rocket.y + lx * sin + ly * cos };
+            const rx = lx - SPEC.com.x;                  // 相对质心
+            const ry = ly - SPEC.com.y;
+            return { x: rocket.x + rx * cos - ry * sin,
+                     y: rocket.y + rx * sin + ry * cos };
         }
 
         // 找出离星球中心最近的那个碰撞点（也就是"最低"的那个）
@@ -1095,6 +1130,10 @@
                 rocket.landed = false;
             }
 
+            // 质心随燃料变化：油烧掉，重心会往船头偏（真实火箭也是这样）。
+            // 每帧重算一次（部件不多，开销可以忽略）。
+            SPEC.com = shipCenterOfMass(shipDef, SPEC, rocket.fuel);
+
             // 成就检查 + 弹出横幅
             checkAchievements(dt);
             updateAchievementToast(dt);
@@ -1342,10 +1381,8 @@
             // 和服务器同步：操控端上报，观战端拉取
             if (netMode || !netMode) { sendState(); fetchState(); }
 
-            // 相机对准「船体几何中心」而不是原点 —— 原点在船底，
-            // 大船直接跟原点的话会整体偏在屏幕下方看不全。
-            const shipCenterOffsetY = -(SPEC.height / 2);
-            const camPt = shipPointWorld(0, shipCenterOffsetY, rocket.angle);
+            // 相机对准质心 —— 原点在船底，直接跟原点的话大船会偏在屏幕下方看不全
+            const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
             camera.x += (camPt.x - camera.x) * 0.1;
             camera.y += (camPt.y - camera.y) * 0.1;
 
@@ -1380,10 +1417,12 @@
                 ctx.restore();
             }
 
-            // 飞船：按你在造船厂拼的部件逐块画出来（不再是一个小箭头）
+            // 飞船：按你在造船厂拼的部件逐块画出来
+            // 旋转中心 = 质心（和物理判定用的是同一个中心，不会出现"转起来错位"）
             ctx.save();
             ctx.translate(rocket.x, rocket.y);
             ctx.rotate((rocket.angle - 90) * Math.PI / 180);
+            ctx.translate(-SPEC.com.x, -SPEC.com.y);
             drawShip(ctx, rocket.state === 'firing' && rocket.fuel > 0, performance.now());
             ctx.restore();
 
@@ -1493,7 +1532,7 @@
                 `距离表面: ${surfaceDist.toFixed(1)} px | 距离球心: ${centerDist.toFixed(1)} px\n` +
                 orbitLine + '\n' +
                 `圆轨道速度: ${vCirc.toFixed(0)} px/s | 逃逸速度: ${vEsc.toFixed(0)} px/s` + orbitHint + '\n' +
-                `质量: ${shipMass(rocket.fuel).toFixed(0)} | 加速度: ${thrustAccel(rocket.fuel, rocket.throttle).toFixed(1)} px/s²` + '\n' +
+                `质量: ${shipMass(rocket.fuel).toFixed(0)} | 加速度: ${thrustAccel(rocket.fuel, rocket.throttle).toFixed(1)} px/s² | 质心: ${SPEC.com.y.toFixed(0)}px` + '\n' +
                 `已绕: ${stats.orbits} 圈 | 成就: ${achieved.size} / ${achievements.length}（按 C 查看） | 音乐: ${bgmMuted ? '关' : '开'}` + '\n' +
                 coopLine();
 

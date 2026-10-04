@@ -503,13 +503,22 @@ function drawPart(p, isSelected) {
 // ============================================================
 //  交互
 // ============================================================
-let placing = null;      // 正在放置的部件类型
-let selected = null;     // 选中的部件对象
-let dragging = null;     // 正在拖动的部件
+let placing = null;         // 正在放置的部件类型
+let stickyPlacing = false;  // 连续放置模式（按住 Shift 时开启）
+let selected = null;        // 选中的部件对象
+let dragging = null;        // 正在拖动的部件
+let dragMoved = false;      // 这一拖有没有真的移动过
 let dragOffset = { x: 0, y: 0 };
-let ghost = null;        // 放置预览
+let ghost = null;           // 放置预览
 let mirror = true;
-let history = [];        // 撤销栈
+let history = [];           // 撤销栈
+
+// 退出放置模式，并把部件库里那张卡片的高亮去掉
+function clearPlacing() {
+    placing = null;
+    ghost = null;
+    document.querySelectorAll('.part-card').forEach(c => c.style.background = '');
+}
 
 function pushHistory() {
     history.push(JSON.stringify(ship.parts));
@@ -581,7 +590,7 @@ function hitTest(px, py) {
 
 canvas.addEventListener('pointerdown', (e) => {
     const pos = pointerPos(e);
-    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId); } catch (err) {}
 
     if (placing) {
         const g = p2g(pos.x, pos.y);
@@ -591,6 +600,9 @@ canvas.addEventListener('pointerdown', (e) => {
         const gy = g.y - Math.floor(t.h / 2);
         if (canPlace(placing, gx, gy, null)) {
             addPart(placing, gx, gy);
+            // 放完就退出「放置模式」，否则之后点画布只会一直放新的，
+            // 永远选不中已有部件，也就永远删不掉。
+            if (!stickyPlacing) clearPlacing();
         } else {
             toast('这里放不下');
         }
@@ -601,6 +613,7 @@ canvas.addEventListener('pointerdown', (e) => {
     if (hit) {
         selected = hit;
         dragging = hit;
+        dragMoved = false;
         const r = partRect(hit);
         dragOffset = { x: pos.x - r.x, y: pos.y - r.y };
         draw();
@@ -627,20 +640,26 @@ canvas.addEventListener('pointermove', (e) => {
         const t = PART_TYPES[dragging.type];
         const gx = Math.round((pos.x - dragOffset.x - origin.x) / GRID);
         const gy = Math.round((origin.y - (pos.y - dragOffset.y) - t.h * GRID) / GRID);
-        if (canPlace(dragging.type, gx, gy, dragging.id)) {
-            dragging.x = gx; dragging.y = gy;
-            saveShip();
-            draw();
+        if (gx !== dragging.x || gy !== dragging.y) {
+            dragMoved = true;
+            if (canPlace(dragging.type, gx, gy, dragging.id)) {
+                dragging.x = gx; dragging.y = gy;
+                saveShip();
+                draw();
+            }
         }
     }
 });
 
 function endPointer() {
-    if (dragging) { updateStats(); }
+    if (dragging) { updateStats(); draw(); }
     dragging = null;
+    dragMoved = false;
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
+// 指针滑出画布也要收尾，否则会卡在拖动状态
+canvas.addEventListener('pointerleave', (e) => { if (!dragging) return; endPointer(); });
 
 // ============================================================
 //  界面
@@ -652,11 +671,18 @@ for (const [key, t] of Object.entries(PART_TYPES)) {
     card.innerHTML = '<span class="swatch" style="background:' + t.body + ';border:2px solid ' + t.edge + '"></span>'
         + '<span class="meta"><span class="pname">' + t.name + '</span><br>'
         + '<span class="pinfo">' + t.w + '×' + t.h + '　质量 ' + t.mass + (t.fuel ? '　燃料 +' + t.fuel : '') + (t.thrust ? '　推力 ' + t.thrust : '') + '</span></span>';
-    card.addEventListener('click', () => {
-        placing = (placing === key) ? null : key;
-        ghost = null;
-        document.querySelectorAll('.part-card').forEach(c => c.style.background = '');
-        if (placing) { card.style.background = '#1e3a5c'; toast('点画布放下「' + t.name + '」'); }
+    card.addEventListener('click', (ev) => {
+        // 再点一次同一个部件 = 取消；按住 Shift 点 = 连续放置多个
+        stickyPlacing = !!(ev && ev.shiftKey);
+        if (placing === key && !stickyPlacing) {
+            clearPlacing();
+        } else {
+            placing = key;
+            ghost = null;
+            document.querySelectorAll('.part-card').forEach(c => c.style.background = '');
+            card.style.background = '#1e3a5c';
+            toast('点画布放下「' + t.name + '」' + (stickyPlacing ? '（连续放置，再点一次卡片取消）' : ''));
+        }
         draw();
     });
     partListEl.appendChild(card);
@@ -724,8 +750,9 @@ document.getElementById('btn-undo').addEventListener('click', () => {
 });
 
 document.getElementById('btn-del').addEventListener('click', () => {
-    if (!selected) { toast('先点一下要删除的部件'); return; }
+    if (!selected) { toast('先点一下画布上的部件选中它，再点这里删除'); return; }
     removePart(selected);
+    toast('已删除');
 });
 
 document.getElementById('shipname').addEventListener('input', (e) => {
