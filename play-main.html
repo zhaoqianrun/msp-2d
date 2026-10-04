@@ -5,15 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MSP2D - 猫咪航天局</title>
     <style>
-        body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+        html, body { height: 100%; }
+        /* 画布铺满整个窗口：宇宙必须填满屏幕，按钮和 HUD 浮在它上面，
+           而不是让宇宙缩在中间一小块、四周露出黑边。 */
+        body { margin: 0; background: #05070d; height: 100vh; overflow: hidden; position: relative; }
         /* 画布自适应：手机上自动缩放到装得下，触控不要触发滚动/双指缩放 */
         canvas {
-            border: 1px solid #333; display: block;
-            max-width: 100vw; max-height: 100vh;
-            touch-action: none;
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%; display: block;
+            border: none; touch-action: none;
         }
         #hud {
-            position: absolute; top: 10px; left: 10px; color: #0f0;
+            position: absolute; top: 10px; left: 10px; z-index: 3; color: #0f0;
             font-family: monospace; font-size: 14px; pointer-events: none;
             text-shadow: 1px 1px 2px #000; white-space: pre;
         }
@@ -196,6 +199,26 @@
     <script>
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
+
+        // ==================== 画布自适应 ====================
+        // 画布铺满窗口，宇宙才有足够的显示面积。
+        // 渲染分辨率跟着窗口走（考虑高 DPI），物理坐标不变。
+        // 逻辑画布尺寸（绘制时统一用这两个，替代以前写死的 1000 / 700）
+        let canvasW = 1000, canvasH = 700;
+        function fitCanvas() {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            const w = Math.max(320, window.innerWidth);
+            const h = Math.max(240, window.innerHeight);
+            canvas.width = Math.round(w * dpr);      // canvas.width 是物理像素
+            canvas.height = Math.round(h * dpr);
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);  // 之后所有绘制都用逻辑坐标
+            canvasW = w; canvasH = h;
+        }
+        fitCanvas();
+        window.addEventListener('resize', () => { fitCanvas(); });
+        window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 120));
         const hud = document.getElementById('hud');
         const throttleFill = document.getElementById('throttle-fill');
         const throttleText = document.getElementById('throttle-text');
@@ -1387,10 +1410,10 @@
             camera.y += (camPt.y - camera.y) * 0.1;
 
             ctx.fillStyle = '#050510';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(0, 0, canvasW, canvasH);
 
             ctx.save();
-            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.translate(canvasW / 2, canvasH / 2);
             ctx.scale(camera.zoom, camera.zoom);
             ctx.translate(-camera.x, -camera.y);
 
@@ -1429,20 +1452,20 @@
             ctx.restore();
 
             // 星球屏幕外箭头
-            const screenX = (planet.x - camera.x) * camera.zoom + canvas.width / 2;
-            const screenY = (planet.y - camera.y) * camera.zoom + canvas.height / 2;
+            const screenX = (planet.x - camera.x) * camera.zoom + canvasW / 2;
+            const screenY = (planet.y - camera.y) * camera.zoom + canvasH / 2;
             const margin = 80;
-            if (screenX < margin || screenX > canvas.width - margin || screenY < margin || screenY > canvas.height - margin) {
-                const dx = screenX - canvas.width / 2;
-                const dy = screenY - canvas.height / 2;
+            if (screenX < margin || screenX > canvasW - margin || screenY < margin || screenY > canvasH - margin) {
+                const dx = screenX - canvasW / 2;
+                const dy = screenY - canvasH / 2;
                 const angle = Math.atan2(dy, dx);
-                const halfW = canvas.width / 2 - margin;
-                const halfH = canvas.height / 2 - margin;
+                const halfW = canvasW / 2 - margin;
+                const halfH = canvasH / 2 - margin;
                 const cos = Math.cos(angle);
                 const sin = Math.sin(angle);
                 const scale = Math.min(halfW / Math.abs(cos || 0.0001), halfH / Math.abs(sin || 0.0001));
-                const arrowX = canvas.width / 2 + cos * scale;
-                const arrowY = canvas.height / 2 + sin * scale;
+                const arrowX = canvasW / 2 + cos * scale;
+                const arrowY = canvasH / 2 + sin * scale;
 
                 ctx.save();
                 ctx.translate(arrowX, arrowY);
