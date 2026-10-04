@@ -1124,18 +1124,86 @@
             c.closePath();
         }
 
+        // ==================== 指令舱（Spaceflight Simulator 风格）====================
+        // 顶部对接环 → 银白锥形舱体 → 侧面舷窗 → 底部黑色隔热盾。全部矢量绘制。
+        function drawCapsule(c, x, y, w, h) {
+            const cx = x + w / 2;
+
+            // 1) 顶部对接环
+            const ringH = h * 0.13, ringW = w * 0.42;
+            shipRoundRect(c, cx - ringW / 2, y, ringW, ringH, ringH * 0.35);
+            const ringGrad = c.createLinearGradient(cx - ringW / 2, 0, cx + ringW / 2, 0);
+            ringGrad.addColorStop(0, '#7d8894'); ringGrad.addColorStop(0.4, '#c3ccd6'); ringGrad.addColorStop(1, '#69737e');
+            c.fillStyle = ringGrad; c.fill();
+            c.strokeStyle = '#5a636d'; c.lineWidth = 1; c.stroke();
+
+            // 2) 舱体（上窄下宽的圆角梯形）
+            const bodyTop = y + ringH * 0.75, bodyBot = y + h * 0.80;
+            const topW = w * 0.60, botW = w * 0.98;
+            c.beginPath();
+            c.moveTo(cx - topW / 2, bodyTop + 3);
+            c.quadraticCurveTo(cx - topW / 2 - 2, bodyTop, cx - topW / 2 + 3, bodyTop);
+            c.lineTo(cx + topW / 2 - 3, bodyTop);
+            c.quadraticCurveTo(cx + topW / 2 + 2, bodyTop, cx + topW / 2, bodyTop + 3);
+            c.lineTo(cx + botW / 2, bodyBot - 3);
+            c.quadraticCurveTo(cx + botW / 2, bodyBot, cx + botW / 2 - 3, bodyBot);
+            c.lineTo(cx - botW / 2 + 3, bodyBot);
+            c.quadraticCurveTo(cx - botW / 2, bodyBot, cx - botW / 2, bodyBot - 3);
+            c.closePath();
+            const bodyGrad = c.createLinearGradient(cx - botW / 2, 0, cx + botW / 2, 0);
+            bodyGrad.addColorStop(0.00, '#9aa5b1'); bodyGrad.addColorStop(0.18, '#e9eef4');
+            bodyGrad.addColorStop(0.42, '#fbfdff'); bodyGrad.addColorStop(0.72, '#d5dde6');
+            bodyGrad.addColorStop(1.00, '#8e99a5');
+            c.fillStyle = bodyGrad; c.fill();
+            c.strokeStyle = '#6f7a86'; c.lineWidth = 1.2; c.stroke();
+
+            c.save(); c.clip();
+            c.strokeStyle = 'rgba(120, 132, 146, 0.55)'; c.lineWidth = 1;
+            for (const f of [0.32, 0.68]) {
+                const px = cx - botW / 2 + botW * f;
+                c.beginPath(); c.moveTo(px, bodyTop); c.lineTo(px, bodyBot); c.stroke();
+            }
+            c.fillStyle = 'rgba(255,255,255,0.35)';
+            c.fillRect(cx - botW / 2, bodyBot - h * 0.06, botW, h * 0.025);
+            c.restore();
+
+            // 3) 舷窗
+            const winR = w * 0.115, winY = bodyTop + (bodyBot - bodyTop) * 0.42;
+            for (const ox of [-w * 0.16, w * 0.16]) {
+                c.beginPath(); c.arc(cx + ox, winY, winR, 0, Math.PI * 2);
+                const wg = c.createRadialGradient(cx + ox - winR * 0.3, winY - winR * 0.3, winR * 0.1, cx + ox, winY, winR);
+                wg.addColorStop(0, '#7fc4ff'); wg.addColorStop(0.55, '#2f7fc4'); wg.addColorStop(1, '#123a5e');
+                c.fillStyle = wg; c.fill();
+                c.strokeStyle = '#4a5a6a'; c.lineWidth = 1.4; c.stroke();
+                c.beginPath(); c.arc(cx + ox - winR * 0.3, winY - winR * 0.32, winR * 0.28, 0, Math.PI * 2);
+                c.fillStyle = 'rgba(255,255,255,0.6)'; c.fill();
+            }
+
+            // 4) 底部隔热盾
+            c.beginPath();
+            c.moveTo(cx - botW / 2, bodyBot - 1);
+            c.lineTo(cx + botW / 2, bodyBot - 1);
+            c.lineTo(cx + botW * 0.44, y + h);
+            c.lineTo(cx - botW * 0.44, y + h);
+            c.closePath();
+            const shieldGrad = c.createLinearGradient(cx - botW / 2, 0, cx + botW / 2, 0);
+            shieldGrad.addColorStop(0.00, '#2a2f36'); shieldGrad.addColorStop(0.30, '#565e68');
+            shieldGrad.addColorStop(0.55, '#454c55'); shieldGrad.addColorStop(1.00, '#22262b');
+            c.fillStyle = shieldGrad; c.fill();
+            c.strokeStyle = '#1a1d21'; c.lineWidth = 1; c.stroke();
+            c.save(); c.clip();
+            c.strokeStyle = 'rgba(15, 17, 20, 0.8)'; c.lineWidth = 0.9;
+            for (const f of [0.25, 0.5, 0.75]) {
+                const px = cx - botW * 0.44 + botW * 0.88 * f;
+                c.beginPath(); c.moveTo(px, bodyBot); c.lineTo(px, y + h); c.stroke();
+            }
+            c.restore();
+        }
+
         // 和造船厂里是同一套画法，只是尺寸参数不同
         function drawShipPart(c, type, t, x, y, w, h) {
             if (type === 'capsule') {
-                const grad = c.createLinearGradient(x, y, x + w, y + h);
-                grad.addColorStop(0, '#f0f5fb'); grad.addColorStop(1, t.body);
-                shipRoundRect(c, x, y, w, h, w * 0.22);
-                c.fillStyle = grad; c.fill();
-                c.strokeStyle = t.edge; c.lineWidth = 1; c.stroke();
-                c.beginPath();
-                c.arc(x + w / 2, y + h * 0.38, w * 0.17, 0, Math.PI * 2);
-                c.fillStyle = t.accent; c.fill();
-                c.strokeStyle = '#2b5f96'; c.lineWidth = 0.8; c.stroke();
+                drawCapsule(c, x, y, w, h);
 
             } else if (type === 'tank') {
                 const grad = c.createLinearGradient(x, 0, x + w, 0);

@@ -40,7 +40,8 @@
     #parts {
         position: absolute; top: 52px; left: 0; bottom: 0; width: 176px; z-index: 4;
         background: rgba(10, 18, 32, 0.93); border-right: 1px solid #1e3050;
-        padding: 12px 10px; overflow-y: auto;
+        padding: 12px 10px; overflow-y: auto; overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
     }
     #parts h3 { color: #6b86a6; font-size: 12px; font-weight: normal; letter-spacing: 2px; margin: 0 0 10px; }
     .part-card {
@@ -55,8 +56,9 @@
     .part-card .pinfo { font-size: 11px; color: #6b86a6; }
 
     /* ===== 建造画布 ===== */
-    #stage { position: absolute; top: 52px; left: 176px; right: 0; bottom: 0; touch-action: none; }
-    #grid { position: absolute; inset: 0; }
+    #stage { position: absolute; top: 52px; left: 176px; right: 0; bottom: 0; touch-action: none; overflow: hidden; }
+    /* 画布必须显式撑满父容器，否则 clientHeight 拿不到正确高度，画面会跑到屏幕外 */
+    #grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
 
     /* ===== 右下角数据面板 ===== */
     #stats {
@@ -224,8 +226,14 @@ let view = { w: 0, h: 0, dpr: 1 };
 
 function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = canvas.clientWidth || canvas.parentElement.clientWidth;
-    const h = canvas.clientHeight || canvas.parentElement.clientHeight;
+    // 一律以父容器（#stage）的尺寸为准，取不到就退回国窗口尺寸
+    const host = canvas.parentElement;
+    let w = (host && host.clientWidth) || window.innerWidth;
+    let h = (host && host.clientHeight) || (window.innerHeight - 52);
+    w = Math.max(200, w);
+    h = Math.max(200, h);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
     canvas.width = Math.floor(w * dpr);
     canvas.height = Math.floor(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -233,6 +241,7 @@ function resize() {
     draw();
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
 
 // 网格坐标（格）↔ 屏幕像素
 // 原点：中轴在画布中心偏上一点，y=0（发动机底面）在下方
@@ -310,6 +319,128 @@ function roundRect(c, x, y, w, h, r) {
     c.closePath();
 }
 
+// ==================== 指令舱（Spaceflight Simulator 风格）====================
+// 结构：顶部对接环 → 银白锥形舱体（带竖向分色）→ 侧面舷窗 → 底部黑色隔热盾
+// 全部矢量绘制，不使用任何第三方素材
+function drawCapsule(c, x, y, w, h) {
+    const cx = x + w / 2;
+
+    // ---- 1) 顶部对接环 ----
+    const ringH = h * 0.13;
+    const ringW = w * 0.42;
+    roundRect(c, cx - ringW / 2, y, ringW, ringH, ringH * 0.35);
+    const ringGrad = c.createLinearGradient(cx - ringW / 2, 0, cx + ringW / 2, 0);
+    ringGrad.addColorStop(0, '#7d8894');
+    ringGrad.addColorStop(0.4, '#c3ccd6');
+    ringGrad.addColorStop(1, '#69737e');
+    c.fillStyle = ringGrad;
+    c.fill();
+    c.strokeStyle = '#5a636d';
+    c.lineWidth = 1;
+    c.stroke();
+
+    // ---- 2) 舱体（上窄下宽的圆角梯形，模拟 SFS 的锥形舱）----
+    const bodyTop = y + ringH * 0.75;
+    const bodyBot = y + h * 0.80;
+    const topW = w * 0.60;
+    const botW = w * 0.98;
+
+    c.beginPath();
+    c.moveTo(cx - topW / 2, bodyTop + 3);
+    c.quadraticCurveTo(cx - topW / 2 - 2, bodyTop, cx - topW / 2 + 3, bodyTop);
+    c.lineTo(cx + topW / 2 - 3, bodyTop);
+    c.quadraticCurveTo(cx + topW / 2 + 2, bodyTop, cx + topW / 2, bodyTop + 3);
+    c.lineTo(cx + botW / 2, bodyBot - 3);
+    c.quadraticCurveTo(cx + botW / 2, bodyBot, cx + botW / 2 - 3, bodyBot);
+    c.lineTo(cx - botW / 2 + 3, bodyBot);
+    c.quadraticCurveTo(cx - botW / 2, bodyBot, cx - botW / 2, bodyBot - 3);
+    c.closePath();
+
+    // 银白金属渐变（左亮右暗，做出圆柱感）
+    const bodyGrad = c.createLinearGradient(cx - botW / 2, 0, cx + botW / 2, 0);
+    bodyGrad.addColorStop(0.00, '#9aa5b1');
+    bodyGrad.addColorStop(0.18, '#e9eef4');
+    bodyGrad.addColorStop(0.42, '#fbfdff');
+    bodyGrad.addColorStop(0.72, '#d5dde6');
+    bodyGrad.addColorStop(1.00, '#8e99a5');
+    c.fillStyle = bodyGrad;
+    c.fill();
+    c.strokeStyle = '#6f7a86';
+    c.lineWidth = 1.2;
+    c.stroke();
+
+    // 舱体上的竖向分色线（SFS 舱体那种板材缝）
+    c.save();
+    c.clip();
+    c.strokeStyle = 'rgba(120, 132, 146, 0.55)';
+    c.lineWidth = 1;
+    for (const f of [0.32, 0.68]) {
+        const px = cx - botW / 2 + botW * f;
+        c.beginPath();
+        c.moveTo(px, bodyTop);
+        c.lineTo(px, bodyBot);
+        c.stroke();
+    }
+    // 底部一圈高光
+    c.fillStyle = 'rgba(255,255,255,0.35)';
+    c.fillRect(cx - botW / 2, bodyBot - h * 0.06, botW, h * 0.025);
+    c.restore();
+
+    // ---- 3) 侧面舷窗（深蓝玻璃 + 高光）----
+    const winR = w * 0.115;
+    const winY = bodyTop + (bodyBot - bodyTop) * 0.42;
+    for (const ox of [-w * 0.16, w * 0.16]) {
+        c.beginPath();
+        c.arc(cx + ox, winY, winR, 0, Math.PI * 2);
+        const wg = c.createRadialGradient(cx + ox - winR * 0.3, winY - winR * 0.3, winR * 0.1, cx + ox, winY, winR);
+        wg.addColorStop(0, '#7fc4ff');
+        wg.addColorStop(0.55, '#2f7fc4');
+        wg.addColorStop(1, '#123a5e');
+        c.fillStyle = wg;
+        c.fill();
+        c.strokeStyle = '#4a5a6a';
+        c.lineWidth = 1.4;
+        c.stroke();
+        // 玻璃高光
+        c.beginPath();
+        c.arc(cx + ox - winR * 0.3, winY - winR * 0.32, winR * 0.28, 0, Math.PI * 2);
+        c.fillStyle = 'rgba(255,255,255,0.6)';
+        c.fill();
+    }
+
+    // ---- 4) 底部隔热盾（黑色烧蚀层，边缘略宽）----
+    const shieldH = y + h - bodyBot;
+    c.beginPath();
+    c.moveTo(cx - botW / 2, bodyBot - 1);
+    c.lineTo(cx + botW / 2, bodyBot - 1);
+    c.lineTo(cx + botW * 0.44, y + h);
+    c.lineTo(cx - botW * 0.44, y + h);
+    c.closePath();
+    const shieldGrad = c.createLinearGradient(cx - botW / 2, 0, cx + botW / 2, 0);
+    shieldGrad.addColorStop(0.00, '#2a2f36');
+    shieldGrad.addColorStop(0.30, '#565e68');
+    shieldGrad.addColorStop(0.55, '#454c55');
+    shieldGrad.addColorStop(1.00, '#22262b');
+    c.fillStyle = shieldGrad;
+    c.fill();
+    c.strokeStyle = '#1a1d21';
+    c.lineWidth = 1;
+    c.stroke();
+    // 隔热瓦分格线
+    c.save();
+    c.clip();
+    c.strokeStyle = 'rgba(15, 17, 20, 0.8)';
+    c.lineWidth = 0.9;
+    for (const f of [0.25, 0.5, 0.75]) {
+        const px = cx - botW * 0.44 + botW * 0.88 * f;
+        c.beginPath();
+        c.moveTo(px, bodyBot);
+        c.lineTo(px, y + h);
+        c.stroke();
+    }
+    c.restore();
+}
+
 // 每个部件的画法（play-main.html 里用同一套，只是尺寸不同）
 function drawPart(p, isSelected) {
     const t = PART_TYPES[p.type];
@@ -317,17 +448,7 @@ function drawPart(p, isSelected) {
     ctx.save();
 
     if (p.type === 'capsule') {
-        // 控制舱：圆角 + 小窗
-        const grad = ctx.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h);
-        grad.addColorStop(0, '#f0f5fb'); grad.addColorStop(1, t.body);
-        roundRect(ctx, r.x, r.y, r.w, r.h, 5);
-        ctx.fillStyle = grad; ctx.fill();
-        ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5; ctx.stroke();
-        // 舷窗
-        ctx.beginPath();
-        ctx.arc(r.x + r.w / 2, r.y + r.h * 0.38, r.w * 0.17, 0, Math.PI * 2);
-        ctx.fillStyle = t.accent; ctx.fill();
-        ctx.strokeStyle = '#2b5f96'; ctx.lineWidth = 1; ctx.stroke();
+        drawCapsule(ctx, r.x, r.y, r.w, r.h);
 
     } else if (p.type === 'tank') {
         // 燃料箱：竖条纹 + 液位线
@@ -648,8 +769,11 @@ window.addEventListener('keydown', (e) => {
 document.getElementById('shipname').value = ship.name || '';
 resize();
 updateStats();
-// 画布尺寸要等布局完成
-setTimeout(resize, 50);
+// 画布尺寸要等布局稳定，多量几次免得跑到屏幕外
+requestAnimationFrame(resize);
+setTimeout(resize, 60);
+setTimeout(resize, 300);
+window.addEventListener('load', resize);
 </script>
 </body>
 </html>
