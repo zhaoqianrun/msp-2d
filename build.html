@@ -60,9 +60,15 @@
     /* 画布必须显式撑满父容器，否则 clientHeight 拿不到正确高度，画面会跑到屏幕外 */
     #grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
 
-    /* ===== 右下角数据面板 ===== */
-    #stats {
+    /* ===== 右下角面板（按钮 + 数据，竖着摞起来，互相不会盖住）===== */
+    #corner {
         position: absolute; right: 14px; bottom: 14px; z-index: 4;
+        display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+        max-width: 46vw;
+    }
+    #actions { display: flex; gap: 8px; }
+    #actions .tbtn { flex: 1; text-align: center; }
+    #stats {
         background: rgba(10, 18, 32, 0.94); border: 1px solid #24395a;
         border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.9;
         min-width: 210px;
@@ -78,9 +84,7 @@
         color: #5a6b80; font-size: 12px; line-height: 1.7; pointer-events: none;
     }
 
-    /* ===== 右下角操作按钮（手机）===== */
-    #actions { position: absolute; right: 14px; bottom: 168px; z-index: 4; display: flex; flex-direction: column; gap: 8px; }
-    #actions .tbtn { text-align: center; }
+
 
     @media (max-width: 700px) {
         #parts { width: 132px; padding: 8px 6px; }
@@ -89,7 +93,9 @@
         .part-card .swatch { width: 20px; height: 20px; }
         .part-card .pname { font-size: 12px; }
         .part-card .pinfo { font-size: 10px; }
-        #stats { font-size: 11px; padding: 9px 11px; min-width: 168px; }
+        #stats { font-size: 11px; padding: 9px 11px; min-width: 148px; }
+        #corner { max-width: 62vw; gap: 6px; }
+        #actions { gap: 6px; }
         #stats .k { width: 68px; }
         #hint { display: none; }
         #shipname { width: 104px; font-size: 12px; padding: 6px 8px; }
@@ -118,12 +124,13 @@
     <canvas id="grid"></canvas>
 </div>
 
-<div id="actions">
-    <button class="tbtn" id="btn-undo">撤销</button>
-    <button class="tbtn danger" id="btn-del">删除选中</button>
+<div id="corner">
+    <div id="actions">
+        <button class="tbtn" id="btn-undo">撤销</button>
+        <button class="tbtn danger" id="btn-del">删除选中</button>
+    </div>
+    <div id="stats"></div>
 </div>
-
-<div id="stats"></div>
 <div id="hint">
     点左边的部件 → 再点画布放下　·　拖动已放置的部件可以移动　·　点部件选中后按「删除选中」<br>
     镜像对称打开时，放在中轴右边的部件会自动在左边生成一个
