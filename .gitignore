@@ -1,0 +1,15 @@
+# Python 编译缓存
+__pycache__/
+*.py[cod]
+
+# 游戏运行时产生的文件（每台机器不一样，不进版本库）
+savegame.json
+savegame.json.tmp
+clients.json
+shared-state.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
