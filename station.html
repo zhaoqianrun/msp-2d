@@ -118,13 +118,25 @@ try {
 let serverUp = false;
 let world = null;
 
-// 从服务器拿实时状态
+// 从服务器拿实时状态。
+// 关键：要记住上次拿到的版本号（rev），只请求变化的部分。
+// 之前每次都传 since=0，服务器在「版本没变」时只回 {changed:false} 不带数据，
+// 结果页面永远停在第一次的旧数据上，必须手动刷新才更新。
+let lastRev = 0;
+let lastRenderKey = '';     // 内容指纹，没变就不重画（省性能、也不闪）
+
 async function poll() {
     try {
-        const r = await fetch('/api/state?cid=' + encodeURIComponent(clientId) + '&observe=1&since=0');
+        const r = await fetch('/api/state?cid=' + encodeURIComponent(clientId) +
+                              '&observe=1&since=' + lastRev + '&t=' + Date.now());
         const d = await r.json();
         serverUp = true;
-        if (d && d.world) world = d.world;
+        if (d && d.changed && d.world) {
+            world = d.world;
+            lastRev = d.rev;
+        } else if (typeof d.rev === 'number' && d.rev > lastRev) {
+            lastRev = d.rev;
+        }
     } catch (e) {
         serverUp = false;
     }
@@ -144,6 +156,11 @@ function localShip() {
 function render() {
     const list = document.getElementById('list');
     const info = document.getElementById('planet-info');
+
+    // 内容指纹：数据没变就不重画 DOM（否则每 1.5 秒重建一次，鼠标点选会被打断）
+    const key = serverUp + '|' + (world ? JSON.stringify(world) : 'none');
+    if (key === lastRenderKey) return;
+    lastRenderKey = key;
 
     if (serverUp && world && world.planet) {
         info.innerText = `半径 ${fmtDist(world.planet.radius)}　·　服务器在线，数据实时`;

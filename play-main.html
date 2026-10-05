@@ -510,18 +510,52 @@
         let shipDef = loadShipLocal();
 
         // 从部件算出：空船质量、燃料容量、总推力、包围盒
-        // 活着的部件算出来的燃料容量（炸掉的箱子不再提供容量）
-        function aliveFuelCap() {
-            let cap = 0;
+        // ==================== 飞船状态缓存 ====================
+        // 以前每次上报（10Hz）都要遍历全部部件去数「还有没有控制舱 / 发动机 / 多少油」，
+        // 部件多了就是白白浪费。改成缓存：只在部件被毁 / 船体变化时重算一次。
+        let shipCache = {
+            alive: 0,            // 还活着的部件数
+            total: 0,            // 总部件数
+            capsule: 0,          // 活着的控制舱数
+            engine: 0,           // 活着的发动机数
+            fuelCap: 0,          // 活着的燃料容量
+            dryMass: 0,          // 空船质量
+            thrust: 0,           // 总推力
+            dirty: true,
+        };
+
+        function invalidateShipCache() { shipCache.dirty = true; }
+
+        function rebuildShipCache() {
+            let alive = 0, capsule = 0, engine = 0, fuelCap = 0, dryMass = 0, thrust = 0;
             for (const p of shipDef.parts) {
                 if (destroyed.has(p.id)) continue;
                 const t = PART_TYPES[p.type];
-                if (t) cap += t.fuel;
+                if (!t) continue;
+                alive++;
+                if (p.type === 'capsule') capsule++;
+                if (p.type === 'engine') engine++;
+                fuelCap += t.fuel;
+                dryMass += t.mass;
+                thrust += t.thrust;
             }
-            return cap;
+            shipCache.alive = alive;
+            shipCache.total = shipDef.parts.length;
+            shipCache.capsule = capsule;
+            shipCache.engine = engine;
+            shipCache.fuelCap = fuelCap;
+            shipCache.dryMass = dryMass;
+            shipCache.thrust = thrust;
+            shipCache.dirty = false;
+            return shipCache;
         }
-        // 注意：SPEC.fuelCap 是「按当时还活着的部件」算的，
-        // 所以炸掉箱子后 SPEC 重算一次才是准的 —— splitVessel 里会做。
+
+        function shipInfo() {
+            return shipCache.dirty ? rebuildShipCache() : shipCache;
+        }
+
+        // 活着的部件算出来的燃料容量（炸掉的箱子不再提供容量）
+        function aliveFuelCap() { return shipInfo().fuelCap; }
 
         function shipSpec(def) {
             let dryMass = 0, fuelCap = 0, thrust = 0;
@@ -953,6 +987,7 @@
                 if (partTemp[p.id] >= limit) {
                     destroyed.add(p.id);
                     blowUpPart(p);
+                    invalidateShipCache();
                     blew++;
                 }
             }
@@ -1142,6 +1177,7 @@
                 if (speed > DESTROY_SPEED || partHP[p.id] <= 0) {
                     destroyed.add(p.id);
                     blowUpPart(p);
+                    invalidateShipCache();
                     blew++;
                 }
             }
@@ -1230,6 +1266,7 @@
             // 否则玩家在造船厂造的船会被默认船覆盖掉。
             shipDef = JSON.parse(JSON.stringify(pristineShip));
             SPEC = shipSpec(shipDef);
+            invalidateShipCache();
             const main = vessels.find(v => v.id === activeVesselId);
             if (main) { main.def = shipDef; main.spec = SPEC; }
             // 满油落地
@@ -1306,6 +1343,7 @@
                     // 主控那截：留在 rocket 里继续用
                     shipDef = { version: 1, name: shipDef.name, parts: g };
                     SPEC = shipSpec(shipDef);
+                    invalidateShipCache();
                     // 燃料容量变了：油量按「占新容量的比例」重新归一
                     const newCap = g.reduce((s, p) => s + (PART_TYPES[p.type] ? PART_TYPES[p.type].fuel : 0), 0);
                     const oldCap = SPEC.fuelCap || 1;
@@ -1403,17 +1441,10 @@
             return best;
         }
 
-        // 还有多少个部件活着
-        function alivePartCount() {
-            return shipDef.parts.filter(p => !destroyed.has(p.id)).length;
-        }
-        // 还有发动机吗（没了就飞不动了）
-        function hasWorkingEngine() {
-            return shipDef.parts.some(p => p.type === 'engine' && !destroyed.has(p.id));
-        }
-        function hasWorkingCapsule() {
-            return shipDef.parts.some(p => p.type === 'capsule' && !destroyed.has(p.id));
-        }
+        // 下面三个都走缓存，不再每次遍历全部部件
+        function alivePartCount() { return shipInfo().alive; }
+        function hasWorkingEngine() { return shipInfo().engine > 0; }
+        function hasWorkingCapsule() { return shipInfo().capsule > 0; }
         const GROUND_FRICTION = 0.85; // 贴地摩擦：停在地上时横向速度每帧乘这个数
 
         // 日志计时器
@@ -2404,6 +2435,7 @@
                 if (parts.length === 0) return;
                 shipDef = { version: 1, name: d.ship.name || '无名', parts };
                 pristineShip = JSON.parse(JSON.stringify(shipDef));   // 重置时回到这艘
+                invalidateShipCache();
                 try { localStorage.setItem('msp2d-ship', JSON.stringify(shipDef)); } catch (e) {}
                 const spec = shipSpec(shipDef);
                 // 提示一下换了船，顺便把飞船摆到新船的表面上
