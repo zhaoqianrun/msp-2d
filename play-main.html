@@ -20,6 +20,53 @@
             font-family: monospace; font-size: 14px; pointer-events: none;
             text-shadow: 1px 1px 2px #000; white-space: pre;
         }
+        /* 顶部中间：本航天器的部件清单 */
+        #parts-bar {
+            position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+            z-index: 3; pointer-events: none; white-space: nowrap;
+            display: flex; align-items: center; gap: 6px;
+            font-family: monospace; font-size: 12px;
+            background: rgba(4, 10, 18, 0.72);
+            border: 1px solid #1e3050; border-radius: 8px;
+            padding: 6px 10px;
+            max-width: calc(100vw - 20px); overflow: hidden;
+        }
+        #parts-bar .p {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 7px; border-radius: 6px;
+            border: 1px solid; line-height: 1.5;
+        }
+        #parts-bar .p .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+        }
+        #parts-bar .p .hp {
+            font-size: 10px; opacity: 0.75;
+        }
+        /* 完好 */
+        #parts-bar .ok { color: #9fe0b0; border-color: #245c38; background: #0a1f12; }
+        #parts-bar .ok .dot { background: #45c46e; }
+        /* 受损 */
+        #parts-bar .hurt { color: #ffd479; border-color: #6b5320; background: #221a08; }
+        #parts-bar .hurt .dot { background: #e0a020; }
+        /* 正在烧 */
+        #parts-bar .hot { color: #ffb37a; border-color: #7a3f18; background: #26120a;
+                          animation: pulse 0.7s ease-in-out infinite; }
+        #parts-bar .hot .dot { background: #ff6a1a; }
+        /* 已毁 */
+        #parts-bar .gone { color: #6a5560; border-color: #3a2a30; background: #160f12;
+                           text-decoration: line-through; opacity: 0.7; }
+        #parts-bar .gone .dot { background: #4a3a40; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+        #parts-bar .summary {
+            color: #8fb4dc; padding-left: 6px; margin-left: 2px;
+            border-left: 1px solid #24395a;
+        }
+        #parts-bar .warn { color: #ff8f8f; font-weight: bold; }
+        @media (max-width: 760px) {
+            #parts-bar { font-size: 10px; padding: 4px 6px; gap: 4px; }
+            #parts-bar .p { padding: 1px 4px; }
+            #parts-bar .p .hp { display: none; }
+        }
         #controls {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
             color: #fff; font-family: monospace; background: rgba(0,0,0,0.7);
@@ -157,6 +204,7 @@
 <body>
     <canvas id="game" width="1000" height="700"></canvas>
     <div id="hud"></div>
+    <div id="parts-bar"></div>
     <div id="throttle-bar"><div id="throttle-fill"></div></div>
     <div id="throttle-text">油门 100%</div>
     <div id="fuel-bar"><div id="fuel-fill"></div></div>
@@ -1038,6 +1086,50 @@
             const pct = Math.round(atmosphereDensity(rocket.x, rocket.y) * 100);
             return `大气层内（空气密度 ${pct}%，层顶 ${fmtDistance(h)}）`;
         }
+
+        // 顶部「本航天器还剩什么零件」
+        const partsBarEl = document.getElementById('parts-bar');
+        let partsBarCache = '';
+
+        function renderPartsBar() {
+            if (!partsBarEl) return;
+            const v = mainView;
+            if (!v) return;
+
+            const total = v.def.parts.length;
+            const alive = alivePartCount();
+            let html = '';
+
+            for (const p of v.def.parts) {
+                const t = PART_TYPES[p.type];
+                if (!t) continue;
+                const dead = v.dead.has(p.id);
+                const hp = v.hp[p.id] || 0;
+                const hpMax = PART_HP[p.type] || 100;
+                const ratio = Math.max(0, Math.min(1, hp / hpMax));
+                const temp = v.temp[p.id] || 0;
+                const limit = HEAT_LIMIT[p.type] || 800;
+                const burning = !dead && temp > limit * 0.6;
+
+                let cls = 'ok';
+                if (dead) cls = 'gone';
+                else if (burning) cls = 'hot';
+                else if (ratio < 0.6) cls = 'hurt';
+
+                const hpTxt = dead ? '' : '<span class="hp">' + Math.round(ratio * 100) + '%</span>';
+                html += '<span class="p ' + cls + '"><span class="dot"></span>' + t.name + hpTxt + '</span>';
+            }
+
+            html += '<span class="summary">' + alive + '/' + total;
+            if (!hasWorkingCapsule()) html += ' <span class="warn">无控制舱</span>';
+            else if (!hasWorkingEngine()) html += ' <span class="warn">无发动机</span>';
+            html += '</span>';
+
+            if (html === partsBarCache) return;
+            partsBarCache = html;
+            partsBarEl.innerHTML = html;
+        }
+
 
         // 某处的大气密度：0 = 真空，1 = 贴着地面
         function atmosphereDensity(x, y) {
@@ -2481,6 +2573,9 @@
                 `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m | 质量: ${shipMass(rocket.fuel).toFixed(0)} 单位` + '\n' +
                 `已绕: ${stats.orbits} 圈 | 成就: ${achieved.size} / ${achievements.length}（按 C 查看） | 音乐: ${bgmMuted ? '关' : '开'}` + '\n' +
                 coopLine();
+
+            // 顶部的部件清单
+            renderPartsBar();
 
             // ==== 终端日志（每秒输出一次） ====
             if (now - lastLogTime > LOG_INTERVAL) {
