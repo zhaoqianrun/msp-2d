@@ -920,8 +920,17 @@
         function updateHeat(dt) {
             const dens = atmosphereDensity(rocket.x, rocket.y);
             const sp = Math.hypot(rocket.vx, rocket.vy);
-            const hot = dens > 0.01 && sp > REENTRY_SPEED;
-            if (dens > 0.05 && sp > 400) unlock('meteor');   // 流星：高速冲进大气
+
+            // 关键：必须「朝地面冲」才算再入加热。
+            // 只看速度的话，垂直起飞加速到几百 px/s 也会被当成再入，
+            // 结果刚离地就把燃料箱烧穿了（这是个真 bug）。
+            const rx = rocket.x - planet.x, ry = rocket.y - planet.y;
+            const r = Math.hypot(rx, ry) || 1;
+            const radialSpeed = (rocket.vx * rx + rocket.vy * ry) / r;   // >0 = 远离星球
+            const divingIn = radialSpeed < -20;                          // 正在往下扎
+
+            const hot = dens > 0.01 && sp > REENTRY_SPEED && divingIn;
+            if (dens > 0.05 && sp > 400 && divingIn) unlock('meteor');
             let blew = 0;
 
             for (const p of shipDef.parts) {
@@ -1201,6 +1210,49 @@
             if (debris.length > 400) debris.splice(0, debris.length - 400);
         }
 
+        // 这一局开局时用的飞船（重置时回到它，而不是重新读 localStorage）
+        let pristineShip = JSON.parse(JSON.stringify(shipDef));
+
+        // 重置：把飞船放回地面，恢复燃料和部件（飞丢了、炸惨了、卡住了都能用）
+        function respawnOnGround() {
+            // 清掉所有失控航天器
+            vessels = vessels.filter(v => v.id === activeVesselId);
+            // 修好所有部件
+            destroyed.clear();
+            partHP = initPartHP();
+            partTemp = initPartTemp();
+            debris = [];
+            wreckedCount = 0; heatWrecked = 0;
+            resetImpactBudget();
+            impactCooldown = 0;
+            // 还原飞船定义（分离后 shipDef 可能被截断了）
+            // 注意：这里要用「这一局开局时的船」，不能重新读 localStorage ——
+            // 否则玩家在造船厂造的船会被默认船覆盖掉。
+            shipDef = JSON.parse(JSON.stringify(pristineShip));
+            SPEC = shipSpec(shipDef);
+            const main = vessels.find(v => v.id === activeVesselId);
+            if (main) { main.def = shipDef; main.spec = SPEC; }
+            // 满油落地
+            rocket.fuel = 1;
+            rocket.throttle = 1;
+            rocket.state = 'idle';
+            rocket.angle = 90;
+            rocket.vx = 0; rocket.vy = 0;
+            rocket.heat = 0;
+            stats.escapedFar = false;
+            placeOnSurface();
+            if (main) {
+                main.x = rocket.x; main.y = rocket.y;
+                main.vx = 0; main.vy = 0; main.landed = true;
+                main.fuel = 1; main.destroyed = destroyed;
+            }
+            toastQueue.push({
+                title: '重 新 开 始',
+                name: '飞船已修复并放回地面',
+                desc: '燃料满格，部件全好',
+            });
+        }
+
         // ==================== 分离 ====================
         // 中间炸断了，船就断成两截（甚至更多）。
         // 用「并查集」找出哪些部件还连在一起 —— 挨着的算同一截。
@@ -1392,6 +1444,7 @@
             if (e.code === 'BracketRight') { keys.zoomIn = true; return; }
             if (e.code === 'KeyC') { toggleAchievementPanel(); return; }
             if (e.code === 'KeyM') { toggleBgm(); return; }
+            if (e.code === 'KeyR') { respawnOnGround(); return; }
             if (e.code === 'KeyT') { toggleTouchPanel(); return; }
             if (e.repeat) return;   // 长按不重复触发下面这些，避免状态乱闪
             if (e.code === 'KeyE') toggleEngine();
@@ -1791,6 +1844,22 @@
 
             // 失控的航天器（惯性飞行，不能操控）
             updateDerelicts(dt);
+
+            // 边界保护：飞出行星系统太远时给个提示，别让玩家莫名其妙一直飘
+            {
+                const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
+                const farLimit = planet.radius * 60;
+                if (r > farLimit && !stats.escapedFar) {
+                    stats.escapedFar = true;
+                    toastQueue.push({
+                        title: '脱 离 引 力 范 围',
+                        name: '你飞出了行星系统',
+                        desc: '没有回头路了 —— 回不去的话按 R 重开这一趟',
+                    });
+                } else if (r < farLimit * 0.8) {
+                    stats.escapedFar = false;
+                }
+            }
 
             // 再入加热 + 碎片 + 撞击冷却
             updateHeat(dt);
@@ -2334,6 +2403,7 @@
                 const parts = d.ship.parts.filter(p => p && PART_TYPES[p.type]);
                 if (parts.length === 0) return;
                 shipDef = { version: 1, name: d.ship.name || '无名', parts };
+                pristineShip = JSON.parse(JSON.stringify(shipDef));   // 重置时回到这艘
                 try { localStorage.setItem('msp2d-ship', JSON.stringify(shipDef)); } catch (e) {}
                 const spec = shipSpec(shipDef);
                 // 提示一下换了船，顺便把飞船摆到新船的表面上
