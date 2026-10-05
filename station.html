@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MSP2D - 喵星地面观察站</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; min-height: 100vh; background: #060a12; color: #cfe2f7;
+        font-family: 'Segoe UI', monospace, sans-serif; padding: 0 0 40px;
+        -webkit-tap-highlight-color: transparent;
+    }
+    header {
+        display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+        padding: 16px 20px; background: rgba(10,18,32,.96);
+        border-bottom: 1px solid #1e3050; position: sticky; top: 0; z-index: 5;
+    }
+    h1 { color: #4a90d9; font-size: 18px; letter-spacing: 4px; margin: 0; }
+    .sub { color: #5a6b80; font-size: 12px; }
+    .spacer { flex: 1; }
+    .tbtn {
+        padding: 8px 14px; font-size: 13px; font-family: inherit; cursor: pointer;
+        background: #16233a; color: #cfe2f7; border: 1px solid #35506e; border-radius: 8px;
+    }
+    .tbtn:hover { background: #1e3050; }
+    .tbtn.go { background: #1d5c33; border-color: #35a05e; color: #c8ffd8; }
+
+    #sky {
+        margin: 20px; padding: 18px; border-radius: 12px;
+        background: radial-gradient(ellipse at 50% 120%, #16233a 0%, #060a12 70%);
+        border: 1px solid #1e3050; text-align: center;
+    }
+    #sky .planet-name { color: #4a90d9; font-size: 13px; letter-spacing: 3px; }
+    #sky .planet-size { color: #6b86a6; font-size: 12px; margin-top: 4px; }
+
+    h2 { color: #6b86a6; font-size: 13px; font-weight: normal; letter-spacing: 2px;
+         margin: 24px 20px 10px; }
+
+    .vessel {
+        margin: 0 20px 12px; padding: 14px 16px; border-radius: 10px;
+        background: #0c1626; border: 1px solid #1e3050;
+    }
+    .vessel.active { border-color: #d08a2a; box-shadow: 0 0 18px rgba(208,138,42,.25); }
+    .vessel.derelict { border-color: #4a3a2a; background: #120e0a; }
+    .vhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+    .vname { font-size: 15px; color: #dce8f7; }
+    .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid; }
+    .tag.manned { color: #ffc35c; border-color: #6a5020; background: #241a08; }
+    .tag.derelict2 { color: #ff9a9a; border-color: #6a3030; background: #241010; }
+    .tag.landed { color: #7fe0a8; border-color: #20603a; background: #0a2416; }
+    .tag.flying { color: #8fb4dc; border-color: #2c4468; background: #101a2c; }
+    .vbody { font-size: 12px; line-height: 1.9; color: #8fb4dc; font-family: monospace; }
+    .vbody .k { color: #5a6b80; display: inline-block; width: 76px; }
+    .parts { margin-top: 6px; font-size: 12px; color: #6b86a6; }
+    .parts .ok { color: #7fe0a8; }
+    .parts .gone { color: #6a3030; text-decoration: line-through; }
+    .vact { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    #empty { margin: 0 20px; padding: 30px; text-align: center; color: #5a6b80;
+             border: 1px dashed #24395a; border-radius: 10px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+    <h1>喵星地面观察站</h1>
+    <span class="sub">MEOWS SPACE PROJECT · 航天器管理</span>
+    <span class="spacer"></span>
+    <button class="tbtn" onclick="location.href='index.html'">主菜单</button>
+    <button class="tbtn go" onclick="location.href='play-main.html'">进入游戏</button>
+</header>
+
+<div id="sky">
+    <div class="planet-name">当 前 星 球</div>
+    <div class="planet-size" id="planet-info">读取中...</div>
+</div>
+
+<h2>在 轨 与 地 面 的 航 天 器</h2>
+<div id="list"></div>
+
+<script>
+// ============================================================
+//  这个页面读「服务器上的实时状态」，展示所有航天器。
+//  服务器没开的话，就退化成"读本地存档"的只读视图。
+// ============================================================
+
+const PART_TYPES = {
+    capsule: { name: '控制舱', w: 2, h: 2, mass: 30, fuel: 0, thrust: 0 },
+    tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0 },
+    engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1449 },
+};
+
+const KM_PER_PX = 2500 / 6000;   // 和 play-main.html 保持一致（这里只是粗略显示）
+
+function fmtDist(px) {
+    const m = px * 0.05;
+    if (Math.abs(m) >= 1000) return (m / 1000).toFixed(2) + ' km';
+    if (Math.abs(m) >= 1) return m.toFixed(m >= 100 ? 0 : 1) + ' m';
+    return (m * 100).toFixed(0) + ' cm';
+}
+function fmtSpeed(pxs) {
+    const ms = pxs * 0.05;
+    if (Math.abs(ms) >= 1000) return (ms / 1000).toFixed(2) + ' km/s';
+    return ms.toFixed(ms >= 100 ? 0 : 1) + ' m/s';
+}
+
+// 观察站要用**独立的身份**，不能和游戏页共用 clientId ——
+// 否则两边会互相抢操控权（观察站一上线，游戏那边就变成观战端了）。
+let clientId = '';
+try {
+    clientId = localStorage.getItem('msp2d-station-id') || '';
+    if (!clientId) {
+        clientId = 'station-' + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem('msp2d-station-id', clientId);
+    }
+} catch (e) { clientId = 'station-anon-' + Math.random().toString(36).slice(2, 8); }
+
+let serverUp = false;
+let world = null;
+
+// 从服务器拿实时状态
+async function poll() {
+    try {
+        const r = await fetch('/api/state?cid=' + encodeURIComponent(clientId) + '&observe=1&since=0');
+        const d = await r.json();
+        serverUp = true;
+        if (d && d.world) world = d.world;
+    } catch (e) {
+        serverUp = false;
+    }
+    render();
+}
+
+// 本地存的飞船（服务器没开时用）
+function localShip() {
+    try {
+        const raw = localStorage.getItem('msp2d-ship');
+        if (!raw) return null;
+        const s = JSON.parse(raw);
+        return (s && Array.isArray(s.parts)) ? s : null;
+    } catch (e) { return null; }
+}
+
+function render() {
+    const list = document.getElementById('list');
+    const info = document.getElementById('planet-info');
+
+    if (serverUp && world && world.planet) {
+        info.innerText = `半径 ${fmtDist(world.planet.radius)}　·　服务器在线，数据实时`;
+    } else if (serverUp) {
+        info.innerText = '服务器在线，但还没有航天器数据（进游戏飞一下就会同步上来）';
+    } else {
+        info.innerText = '服务器未运行 —— 下面是本地存档的飞船（只读）';
+    }
+
+    // 组装要显示的航天器列表
+    let items = [];
+
+    if (serverUp && world && world.rocket) {
+        // 服务器有实时数据
+        const parts = (world.parts || []).map(p => ({ type: p.type, alive: p.alive !== false }));
+        items.push({
+            name: (world.shipName || '当前航天器'),
+            main: true,
+            rocket: world.rocket,
+            parts: parts.length ? parts : null,
+            hasCapsule: world.hasCapsule !== false,
+        });
+        if (Array.isArray(world.derelicts)) {
+            world.derelicts.forEach((d, i) => {
+                items.push({
+                    name: '失控残骸 #' + (i + 1),
+                    derelict: true,
+                    rocket: d,
+                    parts: d.parts || null,
+                    hasCapsule: false,
+                });
+            });
+        }
+    } else {
+        // 退化成本地视图
+        const s = localShip();
+        if (s) {
+            items.push({
+                name: s.name || '本地飞船',
+                main: true,
+                rocket: null,
+                parts: s.parts.map(p => ({ type: p.type, alive: true })),
+                hasCapsule: s.parts.some(p => p.type === 'capsule'),
+                offline: true,
+            });
+        }
+    }
+
+    if (items.length === 0) {
+        list.innerHTML = '<div id="empty">还没有任何航天器<br><br>去「造船厂」造一艘，然后开始游戏</div>';
+        return;
+    }
+
+    list.innerHTML = items.map((it, idx) => {
+        const r = it.rocket;
+        const partsHtml = it.parts
+            ? it.parts.map(p => {
+                const t = PART_TYPES[p.type];
+                const nm = t ? t.name : p.type;
+                return p.alive ? `<span class="ok">${nm}</span>` : `<span class="gone">${nm}</span>`;
+            }).join(' · ')
+            : '（无部件数据）';
+
+        const tags = [];
+        if (it.derelict || !it.hasCapsule) tags.push('<span class="tag derelict2">无控制舱 · 不可操控</span>');
+        else tags.push('<span class="tag manned">有控制舱</span>');
+        if (r) tags.push(r.landed ? '<span class="tag landed">已着陆</span>' : '<span class="tag flying">飞行中</span>');
+
+        let body = '';
+        if (r) {
+            const alt = Math.hypot(r.x - (world.planet ? world.planet.x : 0),
+                                   r.y - (world.planet ? world.planet.y : 0)) - (world.planet ? world.planet.radius : 0);
+            const sp = Math.hypot(r.vx || 0, r.vy || 0);
+            body = `
+                <div><span class="k">高度</span>${fmtDist(alt)}</div>
+                <div><span class="k">速度</span>${fmtSpeed(sp)}</div>
+                <div><span class="k">燃料</span>${Math.round((r.fuel || 0) * 100)}%</div>
+                <div><span class="k">角度</span>${Math.round(r.angle || 0)}°</div>
+            `;
+        } else if (it.offline) {
+            body = '<div><span class="k">状态</span>本地存档（服务器未运行，看不到实时位置）</div>';
+        }
+
+        const canEnter = !it.offline && it.hasCapsule && !it.derelict;
+        const act = it.offline
+            ? '<button class="tbtn" onclick="location.href=\'build.html\'">去造船厂</button>'
+            : `<button class="tbtn ${canEnter ? 'go' : ''}" onclick="enterVessel(${idx})">${canEnter ? '进入并操控' : '进入（只读）'}</button>`;
+
+        return `<div class="vessel ${it.derelict ? 'derelict' : ''} ${it.main ? 'active' : ''}">
+            <div class="vhead">
+                <span class="vname">${it.name}</span>
+                ${tags.join('')}
+            </div>
+            <div class="vbody">${body}</div>
+            <div class="parts">部件：${partsHtml}</div>
+            <div class="vact">${act}</div>
+        </div>`;
+    }).join('');
+}
+
+function enterVessel(idx) {
+    // 进入游戏。有控制舱的能操控，没有的进去也只能看
+    location.href = 'play-main.html?vessel=' + idx;
+}
+
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

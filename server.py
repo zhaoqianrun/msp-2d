@@ -72,23 +72,25 @@ def _now():
     return time.time()
 
 
-def _touch(client_id, ip):
-    """记下这个端还活着；需要时自动接管操控权"""
+def _touch(client_id, ip, observe=False):
+    """记下这个端还活着；需要时自动接管操控权。
+    observe=True 表示这是观察站（只看不玩），不参与操控权争夺。"""
     with STATE_LOCK:
         c = clients.get(client_id)
         if c is None:
             # 新设备：默认先给观战，下面再决定要不要接管操控
             c = {"id": client_id, "role": "spectate", "note": "", "last_seen": 0,
-                 "online": True, "ip": ip}
+                 "online": True, "ip": ip, "observe": observe}
             clients[client_id] = c
+        c["observe"] = observe
 
         c["last_seen"] = _now()
         c["online"] = True
         c["ip"] = ip
 
         # 没有任何人在操控（第一次开服 / 操控端掉了 / 服主把操控端撤了）
-        # → 这个端自动接管，保证总有人能玩
-        if not any(x["role"] == "control" and _is_online(x) for x in clients.values()):
+        # → 这个端自动接管，保证总有人能玩（但观察站不接管）
+        if not observe and not any(x["role"] == "control" and _is_online(x) for x in clients.values()):
             if c["role"] != "control":
                 c["role"] = "control"
                 print(f"[协同] {client_id} 自动接管操控权（当前没有操控端）")
@@ -211,6 +213,12 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
             cid = "anon-" + self.client_address[0]
         return cid
 
+    def _is_observer(self):
+        """观察站这类"只看不玩"的端：不抢操控权，也不给操控权"""
+        from urllib.parse import urlparse, parse_qs
+        q = parse_qs(urlparse(self.path).query)
+        return (q.get("observe") or [""])[0] == "1" 
+
     def _read_body(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -233,7 +241,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         """这个端是什么角色？"""
         _sweep_offline()
         cid = self._client_id()
-        me = _touch(cid, self.client_address[0])
+        me = _touch(cid, self.client_address[0], self._is_observer())
         ctrl = _control_client()
         with STATE_LOCK:
             payload = {
@@ -250,7 +258,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
     def handle_state_get(self):
         """观战端拉取世界状态"""
         _sweep_offline()
-        _touch(self._client_id(), self.client_address[0])
+        _touch(self._client_id(), self.client_address[0], self._is_observer())
         from urllib.parse import urlparse, parse_qs
         q = parse_qs(urlparse(self.path).query)
         try:
@@ -271,7 +279,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         """操控端上报世界状态"""
         _sweep_offline()
         cid = self._client_id()
-        me = _touch(cid, self.client_address[0])
+        me = _touch(cid, self.client_address[0], self._is_observer())
         if me["role"] != "control":
             self.send_json({"ok": False, "error": "not-controller", "role": me["role"]}, status=403)
             return
@@ -379,7 +387,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
     # ---------- 飞船（造船厂产物）----------
     def handle_ship_get(self):
         """play-main.html 读飞船；没有就返回空，前端会用默认船"""
-        _touch(self._client_id(), self.client_address[0])
+        _touch(self._client_id(), self.client_address[0], self._is_observer())
         if not os.path.exists(SHIP_PATH):
             self.send_json({"ok": True, "ship": None})
             return
@@ -394,7 +402,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_ship_post(self):
         """build.html 保存飞船"""
-        _touch(self._client_id(), self.client_address[0])
+        _touch(self._client_id(), self.client_address[0], self._is_observer())
         body = self._read_body()
         if not isinstance(body, dict) or not isinstance(body.get("parts"), list):
             self.send_json({"ok": False, "error": "bad-ship"}, status=400)
@@ -436,7 +444,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def handle_load(self):
-        _touch(self._client_id(), self.client_address[0])
+        _touch(self._client_id(), self.client_address[0], self._is_observer())
         stamp = time.strftime("%H:%M:%S")
         if not os.path.exists(SAVE_PATH):
             print(f"[{stamp}] [读档] 没有存档，返回空对象")
@@ -474,7 +482,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         super().do_POST()
 
     def handle_save(self):
-        _touch(self._client_id(), self.client_address[0])
+        _touch(self._client_id(), self.client_address[0], self._is_observer())
         stamp = time.strftime("%H:%M:%S")
         try:
             length = int(self.headers.get("Content-Length") or 0)

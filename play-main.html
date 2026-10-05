@@ -301,6 +301,16 @@
                           throttle: rocket.throttle, fuel: rocket.fuel, state: rocket.state, landed: rocket.landed },
                 camera: { x: camera.x, y: camera.y, zoom: camera.zoom },
                 orbits: stats.orbits,
+                // 给「喵星地面观察站」看的信息
+                shipName: shipDef.name || '当前航天器',
+                hasCapsule: hasWorkingCapsule(),
+                parts: shipDef.parts.map(p => ({ type: p.type, alive: !destroyed.has(p.id) })),
+                derelicts: vessels.filter(v => v.id !== activeVesselId).map(v => ({
+                    x: v.x, y: v.y, vx: v.vx, vy: v.vy, angle: v.angle,
+                    fuel: v.fuel, landed: v.landed,
+                    parts: v.def.parts.map(p => ({ type: p.type, alive: !v.destroyed.has(p.id) })),
+                })),
+                planet: { x: planet.x, y: planet.y, radius: planet.radius },
             };
             try {
                 await fetch(apiUrl("/api/state"), {
