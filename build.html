@@ -139,6 +139,8 @@
 <script>
 // ============================================================
 //  部件定义 —— play-main.html 里有一份一样的（两边必须一致）
+//  ⚠️ 改这里的任何数值，都要同步改 play-main.html 的 PART_TYPES，
+//     否则造船厂显示的推重比和实际飞行手感会对不上。
 // ============================================================
 const PART_TYPES = {
     capsule: {
@@ -152,15 +154,23 @@ const PART_TYPES = {
         info: '装燃料 +40',
     },
     engine: {
-        name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 80000,
+        // 推力必须和 play-main.html 一致（那里是 40）。
+        // 以前这里写 80000，和实际物理差 2000 倍，
+        // 而且同一行 info 又写「推力 12000」—— 一行里三个数字。
+        name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 40,
         body: '#8d99a8', edge: '#5c6874', accent: '#ff5544',
-        info: '推力 12000',
+        info: '推力 40',
     },
 };
 
 const GRID = 20;              // 一格多少像素
 const MAX_PARTS = 60;
 const SHIP_KEY = 'msp2d-ship';
+
+// 表面引力（像素制），必须和 play-main.html 的 SURFACE_GRAVITY_MS2 / M_PER_PX 一致：
+//   play-main: G0_PX = 3.71 / 50 = 0.0742 px/s²
+// 造船厂用它算推重比，用同一口径才能和实际飞行手感对上。
+const G0_PX = 3.71 / 50;   // = 0.0742 px/s²
 
 // ============================================================
 //  船的存档
@@ -221,6 +231,11 @@ function validateShip(s) {
     if (st.count.capsule < 1) return { ok: false, msg: '要有控制舱才能驾驶' };
     if (st.count.engine < 1) return { ok: false, msg: '要有发动机才能飞' };
     if (st.thrust <= 0) return { ok: false, msg: '发动机没有推力' };
+    // 推重比 > 1 才飞得起来（SHIP-FORMAT.md 里一直写着这条，
+    // 但代码以前没实现 —— 因为旧的引力口径算出来永远 > 1，加了也没意义）。
+    if (st.fullMass > 0 && st.thrust / st.fullMass / G0_PX <= 1) {
+        return { ok: false, msg: '推重比不足，飞不起来' };
+    }
     return { ok: true, msg: '' };
 }
 
@@ -696,10 +711,12 @@ for (const [key, t] of Object.entries(PART_TYPES)) {
 }
 
 const statsEl = document.getElementById('stats');
+
 function updateStats() {
     const st = shipStats(ship);
     const v = validateShip(ship);
-    const twr = st.thrust / st.fullMass / 200;   // 引力 200
+    // 推重比 = 总推力 ÷ 满油质量 ÷ 地面引力（全部像素制，见文件顶部 G0_PX）
+    const twr = st.fullMass > 0 ? st.thrust / st.fullMass / G0_PX : 0;
     const rows = [
         ['控制舱', st.count.capsule + ' 个' + (st.count.capsule ? '' : ' ← 需要')],
         ['燃料箱', st.count.tank + ' 个'],

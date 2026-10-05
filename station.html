@@ -87,19 +87,24 @@
 const PART_TYPES = {
     capsule: { name: '控制舱', w: 2, h: 2, mass: 30, fuel: 0, thrust: 0 },
     tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0 },
-    engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1449 },
+    // 和 play-main.html 一致（那里是 40）。以前这里写 1449，
+    // 是早期尺度的遗留值，反正是第四个不同的推力数字了。
+    engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 40 },
 };
 
-const KM_PER_PX = 2500 / 6000;   // 和 play-main.html 保持一致（这里只是粗略显示）
+// 和 play-main.html 的 M_PER_PX 保持一致：1 px = 50 m。
+// 以前这里用 0.05（1 px = 5 cm），高度和速度都少了 1000 倍 ——
+// 「高度 2.45 m」其实是 2.45 km，观察站显示的数字和游戏里对不上。
+const M_PER_PX = 50;
 
 function fmtDist(px) {
-    const m = px * 0.05;
+    const m = px * M_PER_PX;
     if (Math.abs(m) >= 1000) return (m / 1000).toFixed(2) + ' km';
     if (Math.abs(m) >= 1) return m.toFixed(m >= 100 ? 0 : 1) + ' m';
     return (m * 100).toFixed(0) + ' cm';
 }
 function fmtSpeed(pxs) {
-    const ms = pxs * 0.05;
+    const ms = pxs * M_PER_PX;
     if (Math.abs(ms) >= 1000) return (ms / 1000).toFixed(2) + ' km/s';
     return ms.toFixed(ms >= 100 ? 0 : 1) + ' m/s';
 }

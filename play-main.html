@@ -21,6 +21,31 @@
             text-shadow: 1px 1px 2px #000; white-space: pre;
         }
         /* 顶部中间：本航天器的部件清单 */
+        /* 时间加速按钮：并进右上角的按钮条，不单独定位 */
+        #time-btn {
+            display: flex; align-items: center; gap: 2px;
+            font-family: monospace; font-size: 13px;
+        }
+        #time-btn button {
+            background: #333; color: #fff;
+            border: 1px solid #666; border-radius: 4px; cursor: pointer;
+            font-family: monospace; font-size: 13px;
+            padding: 8px 11px; min-width: 34px;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        #time-btn button:hover { background: #444; }
+        #time-btn button:active { background: #555; }
+        #time-btn #time-value {
+            background: #241a08; color: #ffc35c;
+            border: 1px solid #6a5020; border-radius: 4px;
+            padding: 8px 10px; min-width: 54px; text-align: center;
+            font-weight: bold; margin: 0 4px;
+        }
+        #time-btn #time-value.fast { color: #ff9d5c; border-color: #7a4a18; }
+        #time-btn #time-value.ultra { color: #ff6a6a; border-color: #7a2828;
+                                      animation: pulse 0.9s ease-in-out infinite; }
+
         #parts-bar {
             position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
             z-index: 3; pointer-events: none; white-space: nowrap;
@@ -218,6 +243,11 @@
     <div id="spectator-badge">观 战 中</div>
     <div id="controls">E 点火/关机　A D 旋转　↑↓ 油门(Shift 微调)　[ ] 缩放　+ 加油 / - 卸油(要着陆)　S 存档　L 读档　C 成就　M 音乐　|　蓝色虚线 = 预测轨道</div>
     <div id="top-buttons">
+        <div id="time-btn">
+            <button id="time-down" title="减速（,）">−</button>
+            <div id="time-value">1x</div>
+            <button id="time-up" title="加速（.）">+</button>
+        </div>
         <button class="btn-save" onclick="saveGame()">存档</button>
         <button class="btn-save" onclick="loadGame()">读档</button>
         <button class="btn-save" onclick="toggleAchievementPanel()">成就</button>
@@ -458,23 +488,35 @@
         window.addEventListener('keydown', startBgm);
 
         // ==== 游戏数据 ====
-        // 星球：radius = 半径（像素），越大星球越大。
+        // 星球：半径 2500 km，参数按真实物理选取（火星级重力）：
+        //
+        //   表面重力 3.71 m/s²   —— 火星表面重力
+        //   半径     2500 km
+        //   密度     5.31 g/cm³  —— 比火星(3.9)略重，仍在岩石行星范围
+        //   逃逸速度 4307 m/s    —— 充分留住 N₂/O₂ 大气（比值 8.5 / 9.1）
+        //   表面温度 288 K (15°C) —— 猫咪能活
+        //
+        // 【为什么重力从 1.35 提到 3.71】
+        // 重力 1.35 时飞船「关机后要滑行一分多钟才停下」：
+        //   无阻力时减速时间 ≈ v/g，重力越小刹得越慢。
+        //   1.35 -> 58 m/s 要 43 秒；3.71 -> 只要 15.6 秒。
+        // 而且低速时空气阻力 ∝ v² 几乎为零，单靠加阻力救不回来，
+        // 只能靠重力 —— 所以这里必须把重力提上来。
+        //
+        // 这几个量由同一套物理互相约束，不能单独改：
+        //   密度 = 3g / (4πGR)，逃逸速度 = √(2gR)，标高 = kT/(mg)
+        //
         // 引力用“平方反比”，和真实星球、和 SFS 一样：
-        //     引力 = surfaceGravity × (radius / 距离)²
-        // 所以贴着地面时的引力就是 surfaceGravity —— 想让星球变重只改这个数。
+        //     引力 = g0 × (radius / 距离)²
+        // 所以贴着地面时的引力就是 g0 —— 想让星球变重只改 SURFACE_GRAVITY_MS2。
         const planet = {
             x: 500, y: 350,
-            // 像素半径 20000。这不是「20000 米」——
-            // 真实半径是 1000 km，靠双尺度换算：
-            //   拉远看星球时 1 px = 50 m  -> 20000 px x 50 = 1000 km ✅
-            //   贴着地面时   1 px = 5 cm  -> 飞船 49 px = 2.45 m ✅
-            radius: 20000,
-            // 表面引力：真实值 0.98 m/s²（地球的 1/10）
-            // 物理用像素坐标算，所以换算成像素加速度：
-            //   a_px = a_m / metersPerPixel()
-            // 但 metersPerPixel 随缩放变，所以这里存**真实米制值**，
-            // 由 gravityAt() 动态换算。18 是「地面尺度」下的预换算值占位。
-            surfaceGravity: 19.6,
+            // 像素半径 50000 = 2500 km，按 1 px = 50 m 换算
+            radius: 50000,
+            // 注意：这里**不再**存 surfaceGravity。
+            // 以前存过一个 19.6，但物理实际用的是另一个值，
+            // 两者差几十倍，导致 HUD 的圆轨道速度、推重比、轨道根数全部算错。
+            // 现在全场景只有一个数据源：SURFACE_GRAVITY_MS2（米制）+ G0_PX（像素制）。
         };
         const rocket = {
             x: planet.x, y: planet.y - (planet.radius + 8), vx: 0, vy: 0,   // 一开始就停在星球表面（跟着半径自动算，改星球大小不用再改这里）
@@ -495,6 +537,23 @@
         // 物理参数
         const FIXED_DT = 1 / 60;
         let accumulator = 0;
+
+        // ==================== 时间加速 ====================
+        // 主循环是「固定步长 + 累加器」，所以加速只要把累加器乘个倍率，
+        // 物理本身一行都不用改（每步还是 1/60 秒，只是每帧跑更多步）。
+        //
+        // 可选的倍率档位（按 . 加速 / , 减速，或点屏幕右上角的按钮）
+        const TIME_SCALES = [1, 2, 5, 10, 50, 100];
+        let timeScaleIdx = 0;
+        function timeScale() { return TIME_SCALES[timeScaleIdx]; }
+        function cycleTimeScale(dir) {
+            timeScaleIdx = (timeScaleIdx + (dir || 1) + TIME_SCALES.length) % TIME_SCALES.length;
+            toastQueue.push({
+                title: '时 间 倍 率',
+                name: timeScale() === 1 ? '恢复正常速度' : timeScale() + ' 倍速',
+                desc: '按 . 加速 ｜ 按 , 减速',
+            });
+        }
         let lastTime = performance.now();
 
         // 旋转速度（度/秒），改成你要的手感就调这个数
@@ -508,7 +567,14 @@
         const ZOOM_RATE_PER_SEC = 0.25;
 
         // 燃料：满格能烧多少秒（100% 油门），以及在地面加油/卸油的速度（每秒多少格）
-        const FUEL_BURN_SECONDS = 120;  // 满油门烧完一箱要多少秒（数字越大油越多、越耐用）
+        // 340 秒是按「够入轨 + 余量」算出来的：
+        //   满油净加速度 = 40/115 - 3.71/50 = 0.2736 px/s²
+        //   加速到圆轨道速度 60.9 px/s 需要约 223 秒
+        //   留 1.5 倍余量（爬升、掉头、修正）-> 340 秒
+        //
+        // 燃料变多是因为推力降到 40（为了「关机后能快点停」），
+        // 爬升变慢就得给更多油 —— 这两个是绑在一起的。
+        const FUEL_BURN_SECONDS = 340;  // 满油门烧完一箱要多少秒
         const FUEL_FILL_RATE = 0.6;     // 每秒补 60%，大约 1.7 秒加满
 
         // ==================== 部件（和 build.html 的定义必须一致）====================
@@ -517,85 +583,65 @@
                        body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9' },
             tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
                        body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800' },
-            // 推力 200（配合物理尺度 1px=50m、质量 115）
-            // 起飞余量 88 倍 —— 看着夸张，但这是因为**引力本身很弱**（0.98 m/s²）。
-            // 真实火箭余量只有 1.4 倍，但那是几分钟的缓慢爬升；
-            // 游戏里评价标准应该是「多久到轨道」：
-            //   推力 200 -> 冲出 50 km 大气约 34 秒，10 秒升 4.3 km
-            // 之前配成 4000 时 12 秒就到 21 km/s，直接飞出太阳系了。
-            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 200,
+            // 推力 40（配合物理尺度 1px=50m、质量 115、重力 3.71 m/s²）
+            // 推重比 40/115/(3.71/50) = 4.7 : 1
+            //
+            // 【为什么不是更高】推重比越高，同样几秒点火获得的速度越大，
+            // 关机后要滑行越久才停下（减速时间 ≈ v/g）。
+            //   推力 80 (TWR 9.4): 3秒点火 -> 93 m/s，关机后要 87 秒才落地
+            //   推力 40 (TWR 4.7): 3秒点火 -> 41 m/s，关机后约 25 秒落地
+            // 权衡后取 40：起飞有分量，关机后不会飘太久。
+            // 注意：推力必须和 build.html / station.html 保持一致。
+            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 40,
                        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
         };
         const PART_PX = 7;           // 游戏里一格画多少像素（调小 = 飞船看着更小；建造页是 20）
 
-        // ==================== 真实单位 ====================
-        // 飞船最小部件宽 2 格 = 0.7 米，所以 1 格 = 0.35 米 → 1 像素 = 0.05 米。
-        // 全场景共用这一个比例（星球和飞船同一套），所以数字彼此自洽，
-        // 不会出现「飞船 2.45 米、星球 3000 公里」那种差 100 万倍的矛盾。
-        // ==================== 双尺度坐标 ====================
-        // 问题：飞船 2.45 m 和星球 1000 km 差 40 万倍，
-        // 同一个画面里不可能同时看清。
-        // 做法（和 KSP 一样）：物理统一，但「1 px 代表多少米」随缩放变化。
+        // ==================== 尺度系统（单一比例）====================
+        // 只有这一个比例：1 像素 = 50 米（恒定，不随缩放变）
         //
-        //   贴着地面：每像素几厘米，飞船 49 px 看得清清楚楚
-        //   拉远看星球：每像素几百米，飞船缩成一个点
+        //   星球 50000 px × 50 = 2500 km  ✅
+        //   部件 1 格 = 7 px × 50 = 350 m
         //
-        // 换算公式：实际米数 = 像素数 x metersPerPixel()
-        // metersPerPixel() = GROUND_M_PER_PX / camera.zoom
-        const GROUND_M_PER_PX = 0.05;     // 地面尺度：1 px = 5 cm（飞船 49px = 2.45 m）
-        // 星球真实半径 1000 km，在游戏里用 20000 px 表示 -> 1 px = 50 m
-        const PLANET_RADIUS_KM = 1000;
+        // 想改尺度只改这一个数：它同时决定飞船大小和星球大小。
+        const M_PER_PX = 50;              // 全局唯一比例：1 px = 50 m
+
+        const PLANET_RADIUS_KM = 2500;    // 星球真实半径 2500 km
         const PLANET_RADIUS_M = PLANET_RADIUS_KM * 1000;
-        const ATMO_TOP_KM = 50;                                       // 大气顶 50 km
+        const ATMO_TOP_KM = 120;          // 大气顶 120 km（≈5 个标高，参考线不是物理墙）
         const ATMO_TOP_M = ATMO_TOP_KM * 1000;
 
-        // 当前每像素代表多少米（随缩放实时变）
-        // 物理尺度：**固定不变**，和相机缩放无关。
-        // 物理永远在「1 px = 50 m」这个尺度下跑，
-        // 所以无论你怎么缩放，飞船的速度、轨道、下落都完全一样。
-        const PHYS_M_PER_PX = PLANET_RADIUS_M / 20000;   // = 50 m/px，恒定
+        // 兼容旧名字：物理与换算都用这一个值
+        const PHYS_M_PER_PX = M_PER_PX;
+        const DIST_M_PER_PX = M_PER_PX;   // 距离显示同尺度
 
-        // 显示尺度：只影响「看起来多大」和 HUD 上的数字，
-        // **绝对不参与任何物理计算**。
-        function metersPerPixel() {
-            return PHYS_M_PER_PX;
-        }
-        // 屏幕上一个像素代表多少米（随缩放变，只用于渲染）
-        function displayMetersPerPixel() {
-            return GROUND_M_PER_PX / Math.max(1e-9, camera.zoom);
-        }
+        // 表面引力（米制，唯一数据源）
+        // 3.71 m/s² 是火星表面重力，配合半径 2500 km：
+        //   逃逸速度 √(2×3.71×2.5e6) = 4307 m/s，充分留住 O₂/N₂ 大气；
+        //   密度 3g/(4πGR) = 5.31 g/cm³，落在真实岩石行星范围。
+        // 关键收益：关机后减速时间 ≈ v/g，比 1.35 时快 2.75 倍。
+        const SURFACE_GRAVITY_MS2 = 3.71;
+        // 换算成像素加速度，供物理使用：a_px = a_m / M_PER_PX
+        const G0_PX = SURFACE_GRAVITY_MS2 / M_PER_PX;   // = 0.0742 px/s²
 
-        const METERS_PER_GRID = 0.35;
-        const METERS_PER_PX = METERS_PER_GRID / PART_PX;
-
-        // 像素 → 距离文字。
-        // 注意：距离的换算**不随缩放变** —— 因为「星球 20000px = 1000 km」
-        // 是固定的（1 px = 50 m 的星球尺度）。
-        // 缩放只影响「看起来多大」，不影响「实际是多少」。
-        const DIST_M_PER_PX = PLANET_RADIUS_M / 20000;   // = 50 m/px
+        // 像素 → 距离文字。距离换算与缩放无关（缩放只影响看起来多大）。
         function fmtDistance(px) {
             const m = px * DIST_M_PER_PX;
             if (Math.abs(m) >= 1000) return (m / 1000).toFixed(m >= 100000 ? 0 : 2) + ' km';
             if (Math.abs(m) >= 1) return m.toFixed(m >= 100 ? 0 : 1) + ' m';
             return (m * 100).toFixed(0) + ' cm';
         }
-        // 像素/秒 → 速度文字。用**固定**的物理尺度换算，
-        // 所以缩放视角时速度数字不会跟着乱变。
+        // 像素/秒 → 速度文字
         function fmtSpeed(pxPerSec) {
-            const ms = pxPerSec * PHYS_M_PER_PX;
+            const ms = pxPerSec * M_PER_PX;
             if (Math.abs(ms) >= 1000) return (ms / 1000).toFixed(2) + ' km/s';
             return ms.toFixed(ms >= 100 ? 0 : 1) + ' m/s';
         }
-        // 飞船尺寸用地面尺度（1 px = 5 cm）
-        function fmtShipSize() {
-            const w = SPEC.width * GROUND_M_PER_PX;
-            const h = SPEC.height * GROUND_M_PER_PX;
-            return { w: w, h: h };
-        }
-        // 飞船尺寸（米）—— 用地面尺度，和真实尺寸一致
+        // 飞船尺寸（米）—— 和其他一切共用同一个比例
+        // 数值虽大（公里级），但和星球 1000 km 是同一把尺子，量纲自洽。
         function shipSizeMeters() {
-            return { w: SPEC.width * GROUND_M_PER_PX,
-                     h: SPEC.height * GROUND_M_PER_PX };
+            return { w: SPEC.width * M_PER_PX,
+                     h: SPEC.height * M_PER_PX };
         }
 
         function defaultShip() {
@@ -865,7 +911,10 @@
             { id: 'round_trip',    name: '环游半球',   desc: '着陆点离起飞点超过 3000 px' },
         ];
 
-        const GRAVITY_MU = planet.surfaceGravity * planet.radius * planet.radius;
+        // 引力常数 μ = g0 × R²（像素制）—— 用于能量判据 / 轨道根数 / 逃逸判定。
+        // 以前这里乘的是 planet.surfaceGravity（19.6），比真实 g0（0.0196）大 1000 倍，
+        // 导致「逃脱摇篮」成就几乎永远拿不到、轨道根数也是错的。现在统一用 G0_PX。
+        const GRAVITY_MU = G0_PX * planet.radius * planet.radius;
         const achieved = new Set();
         const pendingSettlement = [];   // 这一趟任务拿到、还没结算的成就
         const toastQueue = [];
@@ -1139,22 +1188,26 @@
         const ATMO_RATIO = ATMO_TOP_M / PLANET_RADIUS_M;
         // 阻力系数。drag = 系数 x 密度 x 速度²（**像素制**）
         //
-        // 注意：物理换成像素尺度后，引力只有 0.0196 px/s²，
-        // 所以阻力系数必须跟着换算，不能沿用旧尺度的值
-        // （之前 0.00003 是旧尺度留下的，实际阻力只有引力的千分之一，玩家完全感觉不到）。
+        // 【这一版是按终端速度重算的，之前的 2e-6 是个严重错误】
+        // 2e-6 是按「500 px/s」调的，但 500 px/s = 25000 m/s（25 km/s）——
+        // 玩家实际速度只有 1~61 px/s（50~3045 m/s），
+        // 所以旧系数下阻力只有重力的 0.16%，等于没有大气。
         //
-        // 取 2e-6 后（配合 8.5 km 标高、引力 0.0196）：
-        //   高度    密度     500px/s 阻力  占引力    1000px/s 阻力  占引力
-        //    0 km  100.0%      0.500    2551%         2.000    10204%
-        //    5 km   55.5%      0.278    1417%         1.111     5668%
-        //   10 km   30.8%      0.154     787%         0.617     3148%
-        //   20 km    9.5%      0.048     243%         0.190      970%
-        //   30 km    2.9%      0.015      75%         0.059      300%
-        //   50 km    0.3%      0.001       7%         0.006       28%
+        // 现在按**终端速度**定系数：CAP = G0 / v_term²
+        // 终端速度 = 阻力恰好等于重力时的速度，也就是自由落体的最大速度。
+        // 取地面终端速度 800 m/s，得到 CAP = 2.9e-4。
         //
-        // 效果：低空阻力远大于引力（明显被拖住），
-        //       30 km 还有 3/4 引力，到 50 km 才基本自由。
-        const DRAG_COEF = 2e-6;
+        // 检查表（密度按 23.1 km 标高，重力 3.71 m/s²）：
+        //   速度      0 km 阻力  占重力    23 km 阻力  占重力
+        //    100 m/s     0.029      1%        0.011      0%
+        //    400 m/s     0.464     13%        0.172      5%
+        //    800 m/s     1.856     50%        0.687     19%
+        //   1600 m/s     7.424    200%        2.748     74%
+        //   3045 m/s    26.88     724%        9.95     268%   <- 入轨速度
+        //
+        // 效果：低空有明显刹车，高速再入会被大气剧烈减速；
+        //       高空（>100 km）阻力快速消失，正常入轨不受影响。
+        const DRAG_COEF = 2.9e-4;
         const REENTRY_SPEED = 120;          // 超过这个速度冲进大气就开始发光
 
         function atmoThickness() { return planet.radius * ATMO_RATIO; }
@@ -1182,6 +1235,24 @@
 
             return `大气 ${label}（密度 ${pct < 1 ? pct.toFixed(1) : Math.round(pct)}%，高度 ${altKm < 10 ? altKm.toFixed(1) : Math.round(altKm)} km）`;
         }
+
+        // 时间倍率按钮的显示
+        const timeValueEl = document.getElementById('time-value');
+        const timeDownEl = document.getElementById('time-down');
+        const timeUpEl = document.getElementById('time-up');
+        let timeBtnCache = '';
+
+        function renderTimeBtn() {
+            if (!timeValueEl) return;
+            const s = timeScale();
+            const label = s + 'x';
+            if (label === timeBtnCache) return;
+            timeBtnCache = label;
+            timeValueEl.innerText = label;
+            timeValueEl.className = s >= 100 ? 'ultra' : (s > 1 ? 'fast' : '');
+        }
+        if (timeDownEl) timeDownEl.addEventListener('click', () => cycleTimeScale(-1));
+        if (timeUpEl) timeUpEl.addEventListener('click', () => cycleTimeScale(1));
 
         // 顶部「本航天器还剩什么零件」
         const partsBarEl = document.getElementById('parts-bar');
@@ -1228,38 +1299,32 @@
 
 
         // 某处的大气密度：0 = 真空，1 = 贴着地面
-        // 大气密度：真实大气是**指数衰减**的，不是到某个高度突然消失。
-        // 以前用 (1 - alt/h)² —— 到 50 km 直接归零，
-        // 结果「一出大气阻力就完全消失」，很突兀。
-        //
-        // 现在：density = exp(-alt / SCALE_HEIGHT)
+        // 大气密度用**指数衰减**：density = exp(-alt / SCALE_HEIGHT)
         //   SCALE_HEIGHT 是「标高」：每上升这么多，密度降到 1/e
-        //   地球的对流层标高约 8.5 km，这里取 9 km，和真实接近
         //
-        // 好处：
-        //   · 没有硬边界，飞到哪儿都有（很稀薄的）空气
-        //   · 低空密度接近 1，高空指数下降，过渡自然
-        //   · 「大气层顶」变成一个参考线（50 km），不再是物理墙
-        // 标高用地球真实值 8.5 km。
-        // 之前取 16 km 太厚了 —— 20 km 处密度还有 29%，
-        // 阻力比引力还大，飞起来像在糖浆里。
+        // 标高按真实物理算：H = kT / (m·g)
+        //   本星球：T = 288 K(15°C，猫咪能活)，主要成分 N₂，g = 3.71 m/s²
+        //   -> H = 1.381e-23 × 288 / (28 × 1.661e-27 × 3.71) = 23.1 km
         //
-        // 8.5 km 的曲线（对标地球观感）：
+        // 对比：地球 8.5 km（g=9.81），本星球 23.1 km（g=3.71）——
+        // 重力小 2.6 倍，大气就厚 2.6 倍，这是物理必然。
+        //
+        // 23.1 km 标高的曲线：
         //     0 km 密度 100%
-        //     5 km 密度  49%
-        //    10 km 密度  24%
-        //    20 km 密度   6%
-        //    30 km 密度  1.4%
-        //    50 km 密度  0.08%  <- 基本自由
-        //   100 km 密度  0.001%
-        const ATMO_SCALE_HEIGHT = 8500 / DIST_M_PER_PX;    // 8.5 km，地球真实标高
-        const ATMO_FADE_KM = 150;                          // 150 km 以上完全忽略
+        //    16 km 密度  50%
+        //    23 km 密度  37%   <- 1 个标高
+        //    46 km 密度  14%   <- 2 个标高
+        //    69 km 密度   5%
+        //   120 km 密度 0.6%   <- 参考线「大气顶」
+        const ATMO_SCALE_HEIGHT_KM = 23.1;                 // 标高（按 kT/mg 算出）
+        const ATMO_SCALE_HEIGHT = (ATMO_SCALE_HEIGHT_KM * 1000) / DIST_M_PER_PX;
+        const ATMO_FADE_KM = 200;                          // 200 km 以上完全忽略（≈8.7 个标高）
 
         function atmosphereDensity(x, y) {
             const r = Math.hypot(x - planet.x, y - planet.y);
             const alt = r - planet.radius;
             if (alt < 0) return 1;
-            // 200 km 以上当作真空（真实大气到那儿也基本没了）
+            // 200 km 以上当作真空（8.7 个标高，密度已降到千万分之一）
             if (alt * DIST_M_PER_PX > ATMO_FADE_KM * 1000) return 0;
             // 指数衰减
             const d = Math.exp(-alt / ATMO_SCALE_HEIGHT);
@@ -1806,6 +1871,9 @@
             if (e.code === 'KeyC') { toggleAchievementPanel(); return; }
             if (e.code === 'KeyM') { toggleBgm(); return; }
             if (e.code === 'KeyR') { respawnOnGround(); return; }
+            // 时间加速：逗号减速、句号加速（T 已经被「触控面板」占用）
+            if (e.code === 'Comma') { cycleTimeScale(-1); return; }
+            if (e.code === 'Period') { cycleTimeScale(1); return; }
             if (e.code === 'KeyT') { toggleTouchPanel(); return; }
             if (e.repeat) return;   // 长按不重复触发下面这些，避免状态乱闪
             if (e.code === 'KeyE') toggleEngine();
@@ -1991,23 +2059,21 @@
         canvas.addEventListener('pointerleave', endPointer);
 
         // ==== 引力：平方反比（真正的轨道引力）====
-        // a = surfaceGravity × (radius / 距离)²
+        // a = G0_PX × (radius / 距离)²
         // 这里不用另外加“离心力”：我们用的是不跟着飞船转的坐标系，
         // 只要横向速度够快，飞船就会一直“绕着、掉不到地上”—— 这就是轨道。
-        // 表面引力（真实值，米/秒²）—— 地球的 1/10
-        const SURFACE_GRAVITY_MS2 = 0.98;
+        //
+        // SURFACE_GRAVITY_MS2 / G0_PX 已在上面「尺度系统」里定义（唯一数据源），
+        // 这里不再重复声明，避免两处不一致再次出现。
 
-        // 引力：平方反比，a = g0 x (R / r)²
-        // g0 用真实值 0.98 m/s²，再换算成「像素/秒²」参与物理。
-        // 换算比例就是 metersPerPixel() —— 缩放变了，同样的物理结果不变。
+        // 引力：平方反比，a = g0 × (R / r)²
+        // g0 直接用上面算好的 G0_PX（像素/秒²），恒定，绝不用相机缩放。
         function gravityAt(x, y) {
             const dx = planet.x - x;
             const dy = planet.y - y;
             const dist = Math.sqrt(dx*dx + dy*dy) || 1;
             const safe = Math.max(dist, planet.radius * 0.5);   // 防止贴到球心时引力爆表
-            // 用**固定**的物理尺度换算，绝不用相机缩放
-            const g0px = SURFACE_GRAVITY_MS2 / PHYS_M_PER_PX;   // 米制 -> 像素制（恒定）
-            const a = g0px * (planet.radius / safe) ** 2;
+            const a = G0_PX * (planet.radius / safe) ** 2;
             return { ax: (dx / dist) * a, ay: (dy / dist) * a, dist };
         }
 
@@ -2553,10 +2619,18 @@
                 applyRemoteWorld();
                 accumulator = 0;
             } else {
-                accumulator += Math.min(frameTime, 0.25);
-                while (accumulator >= FIXED_DT) {
+                // 时间加速：把这一帧代表的「游戏时间」乘上倍率
+                accumulator += Math.min(frameTime, 0.25) * timeScale();
+                // 单帧最多跑这么多步，防止高倍率下卡死（超过就丢弃剩余时间）
+                const MAX_STEPS_PER_FRAME = 260;
+                let steps = 0;
+                while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
                     physicsStep(FIXED_DT);
                     accumulator -= FIXED_DT;
+                    steps++;
+                }
+                if (accumulator > FIXED_DT * MAX_STEPS_PER_FRAME) {
+                    accumulator = 0;   // 追不上就丢弃，避免越积越多
                 }
             }
 
@@ -2742,11 +2816,17 @@
             const speedNum = Math.sqrt(rocket.vx**2 + rocket.vy**2);
             const speed = speedNum.toFixed(1);
             // 圆轨道速度：在这个高度上“一直绕着不掉下来”需要的横向速度
-            const vCirc = planet.radius * Math.sqrt(planet.surfaceGravity / centerDist);
+            // v = sqrt(μ / r) = R·sqrt(g0 / r)，全部用**同一个** G0_PX 口径。
+            // （以前这里用了 planet.surfaceGravity=19.6，比真实 g0 大 32 倍，
+            //   提示玩家加速到 626 px/s —— 那早就飞出引力范围了。）
+            const vCirc = planet.radius * Math.sqrt(G0_PX / centerDist);
             const vEsc = vCirc * Math.SQRT2;      // 逃逸速度 = 圆轨道速度 × √2（超了就会飞出引力范围）
             let orbitHint = '';
+            // 判定容差按 vCirc 的比例给（15%），这样高低轨道都好用；
+            // 固定 15 px/s 在低轨时比 vCirc 本身还大，等于永远显示「差不多是圆轨道」。
+            const vTol = Math.max(0.5, vCirc * 0.15);
             if (speedNum > vEsc) orbitHint = '  ⚠️ 超过逃逸速度，要飞走了！';
-            else if (Math.abs(speedNum - vCirc) < 15) orbitHint = '  ← 差不多是圆轨道了！';
+            else if (Math.abs(speedNum - vCirc) < vTol) orbitHint = '  ← 差不多是圆轨道了！';
             let statusText = rocket.landed ? '已着陆（按 E 起飞）' : '关机';
             if (rocket.state === 'firing') statusText = '点火中';
 
@@ -2768,8 +2848,11 @@
             else if (rocket.landed) fuelLine2 = '+ 补充 / - 卸掉';
             // 质量随燃料变化 —— 让“飞船变轻”看得见
             const massNow = shipMass(rocket.fuel);
-            // 推重比 = 当前推力 ÷ 当前重量。这里按“贴着地面”的引力算，方便和起飞对比。
-            const twrNow = thrustAccel(rocket.fuel, 1) / planet.surfaceGravity;
+            // 推重比 = 当前推力加速度 ÷ 地面引力加速度。
+            // 分子是像素制加速度，分母也必须是像素制引力 —— 两边同一口径。
+            // （以前分母用 planet.surfaceGravity=19.6，算是算出了 0.09:1，
+            //   显示「推不起来」，可实际物理余量是 88 倍，把人吓一跳。）
+            const twrNow = thrustAccel(rocket.fuel, 1) / G0_PX;
             const massTip = `质量 ${massNow.toFixed(0)}（空船 ${DRY_MASS}）· 推重比 ${twrNow.toFixed(2)}:1`
                 + (rocket.fuel < 0.999 ? `  已减重 ${(FUEL_MASS * (1 - rocket.fuel)).toFixed(0)}` : '');
             fuelText.innerText =
@@ -2778,7 +2861,8 @@
                 + (fuelLine2 ? '\n' + fuelLine2 : '');
 
             // 当前轨道：近地点 / 远地点（就像 SFS 地图里那两个数）
-            const MU = planet.surfaceGravity * planet.radius * planet.radius;
+            // 和 GRAVITY_MU 同源，保证 HUD 与成就判定不会互相打架。
+            const MU = GRAVITY_MU;
             const v2 = rocket.vx * rocket.vx + rocket.vy * rocket.vy;
             const energy = v2 / 2 - MU / centerDist;
             let orbitLine;
@@ -2804,8 +2888,9 @@
                 `已绕: ${stats.orbits} 圈 | 成就: ${achieved.size} / ${achievements.length}（按 C 查看） | 音乐: ${bgmMuted ? '关' : '开'}` + '\n' +
                 coopLine();
 
-            // 顶部的部件清单
+            // 顶部的部件清单 + 右上角时间倍率
             renderPartsBar();
+            renderTimeBtn();
 
             // ==== 终端日志（每秒输出一次） ====
             if (now - lastLogTime > LOG_INTERVAL) {
@@ -2916,9 +3001,11 @@
                     Object.assign(rocket, data.rocket);
                     if (data.planet) Object.assign(planet, data.planet);
                     if (data.camera) Object.assign(camera, data.camera);
-                    // 老存档里是旧的引力字段（gravity、一次反比），这里补成新的平方反比参数
-                    if (typeof planet.surfaceGravity !== 'number') planet.surfaceGravity = 37.3;
+                    // 老存档里可能带着旧的引力字段（gravity / surfaceGravity）。
+                    // 这些字段已经废弃，而且**必须删掉** —— 留着会覆盖掉新的
+                    // 单一数据源，又把单位混用的 bug 带回来。
                     if ('gravity' in planet) delete planet.gravity;
+                    if ('surfaceGravity' in planet) delete planet.surfaceGravity;
                     // 兼容老存档：以前有“冷启动 cold”和“传送中 teleporting”，现在都没了
                     if (rocket.state === 'cold') rocket.state = 'firing';
                     if (typeof rocket.landed !== 'boolean') rocket.landed = false;
