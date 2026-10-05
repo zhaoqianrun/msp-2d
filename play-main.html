@@ -901,8 +901,8 @@
         // 撞得太狠，部件会被震坏、炸掉，同时吃掉一部分速度。
         // 每个部件的耐久不同：燃料箱厚实，控制舱脆一些。
         const DAMAGE_SPEED = 120;     // 超过这个撞击速度才开始受损
-        const DESTROY_SPEED = 420;    // 超过这个速度，撞在哪儿哪儿直接炸
-        const PART_HP = { capsule: 70, tank: 110, engine: 90 };
+        const DESTROY_SPEED = 700;    // px/s，撞得这么快才当场解体（原来 420 太低，正常降落都可能触发）
+        const PART_HP = { capsule: 90, tank: 130, engine: 120 };
 
         // ==================== 再入热损毁 ====================
         // 高速冲进大气时，**迎着气流的那一面**会升温。
@@ -976,6 +976,7 @@
                     // 系数调过：本星球大气只有 120m 厚，穿过它只要两三秒，
                     // 所以加热必须够猛，再入才真的能把部件烧穿。
                     const rate = over * over * 0.0016 * dens * (0.25 + expo * 1.6);
+                    // 迎风面吃得最多，背风面只吃到零头 —— 不再有随机数，结果可预期
                     partTemp[p.id] += rate * dt;
                 } else {
                     // 散热
@@ -1156,25 +1157,70 @@
         }
         resetImpactBudget();
 
+        // 撞击时，每个部件离「撞到地面的那个点」有多近（0 = 正撞，1 = 最远）
+        function impactExposure(p) {
+            const t = PART_TYPES[p.type];
+            if (!t) return 1;
+            const P = PART_PX;
+            // 部件中心（本地像素，相对质心）
+            const cx = (p.x + t.w / 2 - SPEC.centerX) * P - SPEC.com.x;
+            const cy = (SPEC.box.maxY - (p.y + t.h / 2)) * P - SPEC.com.y;
+            // 转到世界坐标
+            const a = (rocket.angle - 90) * Math.PI / 180;
+            const wx = rocket.x + cx * Math.cos(a) - cy * Math.sin(a);
+            const wy = rocket.y + cx * Math.sin(a) + cy * Math.cos(a);
+            // 撞击点的方向（朝星球中心）
+            const dx = planet.x - rocket.x, dy = planet.y - rocket.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const ux = dx / len, uy = dy / len;
+            // 部件在「朝地」方向上的投影：越靠下（越贴近地面），撞得越狠。
+            // u 指向星球中心，所以「部件相对飞船中心、投影到 u 上」越大 = 越靠下。
+            const proj = (wx - rocket.x) * ux + (wy - rocket.y) * uy;
+            const reach = Math.max(SPEC.width, SPEC.height) / 2 || 1;
+            // 注意是加号：proj 大 = 更靠下 = 暴露度高
+            return Math.max(0, Math.min(1, 0.5 + proj / (reach * 2)));
+        }
+
         function applyImpact(speed) {
             if (speed < DAMAGE_SPEED) return 0;
             if (impactCooldown > 0) return 0;          // 刚撞过，这次不算
             impactCooldown = 0.35;                     // 0.35 秒内的连续碰撞只算一次
 
-            // 撞击越狠伤害越大：低于 DAMAGE_SPEED 无伤，之后线性增长
+            // 撞击越狠伤害越大：低于 DAMAGE_SPEED 无伤，之后线性增长。
+            // 系数调低过：以前 0.55 太狠，200 px/s 一次就能把发动机打爆，
+            // 而正常的降落速度就在 200~400 之间，等于一落地就散架。
+            // 现在改成「磨损」：轻度撞击只掉一点血，多撞几次才坏。
             const over = speed - DAMAGE_SPEED;
-            const dmg = over * 0.55;
+            const dmg = over * 0.18;
 
             let blew = 0;
+            // 谁能「当场炸」：撞得特别狠的时候，只有最迎撞的那一个部位会当场解体，
+            // 其余的按伤害扣血。这样才会「从下往上依次毁」，
+            // 而不是一下就整艘全炸（以前 DESTROY_SPEED 一超过就全灭，太粗暴）。
+            let instantKillId = null;
+            if (speed > DESTROY_SPEED) {
+                let best = null, bestExpo = -1;
+                for (const p of shipDef.parts) {
+                    if (destroyed.has(p.id)) continue;
+                    const e = impactExposure(p);
+                    if (e > bestExpo) { bestExpo = e; best = p; }
+                }
+                if (best) instantKillId = best.id;
+            }
+
             for (const p of shipDef.parts) {
                 if (destroyed.has(p.id)) continue;
-                // 每个部件在本次着陆里的总伤害有上限，防止叠死
-                const room = Math.max(0, (PART_HP[p.type] || 80) * 1.6 - (impactBudget[p.id] || 0));
-                const real = Math.min(dmg * (0.6 + Math.random() * 0.8), room);
+                // 关键：伤害按「离撞击点多近」分配，不再所有部件平摊。
+                // 以前每个部件扣一样的血再加随机数，会导致
+                // 「发动机炸了、油箱没事、最上面的控制舱反而炸了」这种怪现象。
+                const expo = impactExposure(p);          // 0 = 最远，1 = 正撞
+                const share = 0.15 + expo * 1.7;         // 撞得近的吃 1.85 倍，远的只吃 0.15 倍
+                // 每次着陆的总伤害上限：小撞能累积磨损，但不会无限叠死
+                const room = Math.max(0, (PART_HP[p.type] || 100) * 2.5 - (impactBudget[p.id] || 0));
+                const real = Math.min(dmg * share, room);
                 impactBudget[p.id] = (impactBudget[p.id] || 0) + real;
                 partHP[p.id] -= real;
-                // 只有一次撞得特别狠（超过 DESTROY_SPEED）才当场炸
-                if (speed > DESTROY_SPEED || partHP[p.id] <= 0) {
+                if (p.id === instantKillId || partHP[p.id] <= 0) {
                     destroyed.add(p.id);
                     blowUpPart(p);
                     invalidateShipCache();
