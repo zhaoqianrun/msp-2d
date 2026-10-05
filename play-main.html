@@ -449,7 +449,7 @@
             engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 80000,
                        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
         };
-        const PART_PX = 14;          // 游戏里一格画多少像素（建造页是 20）
+        const PART_PX = 7;           // 游戏里一格画多少像素（调小 = 飞船看着更小；建造页是 20）
 
         function defaultShip() {
             return { version: 1, name: '默认船', parts: [
@@ -588,6 +588,27 @@
                 if (d < bestD) { bestD = d; best = { local: p, world: w, dist: d }; }
             }
             return best;
+        }
+
+        // 把飞船放到「碰撞箱最深点正好贴在地表」的位置。
+        // 不能简单写 planet.radius —— rocket.y 是船体本地原点，
+        // 最深的碰撞点可能在原点下方（取决于你拼的船形）。
+        function placeOnSurface() {
+            rocket.x = planet.x;
+            rocket.y = planet.y - planet.radius;
+            for (let i = 0; i < 8; i++) {
+                const hit = lowestCollisionPoint(rocket.angle);
+                if (!hit || hit.dist <= 0) break;
+                const push = hit.dist - planet.radius;
+                if (Math.abs(push) < 0.01) break;
+                const ux = (hit.world.x - planet.x) / hit.dist;
+                const uy = (hit.world.y - planet.y) / hit.dist;
+                rocket.x -= ux * push;
+                rocket.y -= uy * push;
+            }
+            rocket.vx = 0;
+            rocket.vy = 0;
+            rocket.landed = true;
         }
 
         // ==================== 质量模型（燃料会变轻）====================
@@ -1594,6 +1615,9 @@
         // 游戏主循环启动 + 和服务器建立协同
         requestAnimationFrame(gameLoop);
         pollControl();
+
+        // 开局：把飞船稳稳放在星球表面（按碰撞箱算，船形怎么变都对）
+        placeOnSurface();
         setInterval(pollControl, CTRL_INTERVAL_MS);
 
         // 如果服务器上有造船厂存的飞船，就用它（手机造的船电脑也能飞）
