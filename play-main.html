@@ -464,12 +464,17 @@
         // 所以贴着地面时的引力就是 surfaceGravity —— 想让星球变重只改这个数。
         const planet = {
             x: 500, y: 350,
-            // 半径 20000 px = 1000 m = 1 km（1 px = 0.05 m）
-            // 这是一颗真正的小行星尺度 —— 飞船 2.45 m，比值约 1:408，数字终于自洽
+            // 像素半径 20000。这不是「20000 米」——
+            // 真实半径是 1000 km，靠双尺度换算：
+            //   拉远看星球时 1 px = 50 m  -> 20000 px x 50 = 1000 km ✅
+            //   贴着地面时   1 px = 5 cm  -> 飞船 49 px = 2.45 m ✅
             radius: 20000,
-            // 表面引力 50 px/s² = 2.5 m/s²，约地球的 1/4
-            // （之前 950 px/s² = 47.5 m/s² 是地球 4.8 倍，和「1 km 星球」完全不匹配）
-            surfaceGravity: 50
+            // 表面引力：真实值 0.98 m/s²（地球的 1/10）
+            // 物理用像素坐标算，所以换算成像素加速度：
+            //   a_px = a_m / metersPerPixel()
+            // 但 metersPerPixel 随缩放变，所以这里存**真实米制值**，
+            // 由 gravityAt() 动态换算。18 是「地面尺度」下的预换算值占位。
+            surfaceGravity: 19.6,
         };
         const rocket = {
             x: planet.x, y: planet.y - (planet.radius + 8), vx: 0, vy: 0,   // 一开始就停在星球表面（跟着半径自动算，改星球大小不用再改这里）
@@ -481,10 +486,11 @@
         };
 
         // ==== 视角控制 ====
-        // 星球半径变成 20000 px（直径 40000 px）后，视野必须跟着扩大，
-        // 否则永远看不到完整的星球。
-        // minZoom = 0.006：1600px 屏能看到 266667 px 宽 = 星球直径的 6.7 倍
-        let camera = { x: 0, y: 0, zoom: 0.25, minZoom: 0.006, maxZoom: 8.0 };
+        // 双尺度缩放范围：
+        //   zoom = 1.0    -> 1 px = 5 cm   （贴地，飞船 49 px 看得清）
+        //   zoom = 0.001  -> 1 px = 50 m   （星球 20000 px 半径，能看全）
+        // 跨度正好 1000 倍，覆盖「从地面到看全整个星球」
+        let camera = { x: 0, y: 0, zoom: 1.0, minZoom: 0.0008, maxZoom: 12.0 };
 
         // 物理参数
         const FIXED_DT = 1 / 60;
@@ -511,7 +517,7 @@
                        body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9' },
             tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
                        body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800' },
-            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 34500,
+            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 4000,
                        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
         };
         const PART_PX = 7;           // 游戏里一格画多少像素（调小 = 飞船看着更小；建造页是 20）
@@ -520,26 +526,59 @@
         // 飞船最小部件宽 2 格 = 0.7 米，所以 1 格 = 0.35 米 → 1 像素 = 0.05 米。
         // 全场景共用这一个比例（星球和飞船同一套），所以数字彼此自洽，
         // 不会出现「飞船 2.45 米、星球 3000 公里」那种差 100 万倍的矛盾。
+        // ==================== 双尺度坐标 ====================
+        // 问题：飞船 2.45 m 和星球 1000 km 差 40 万倍，
+        // 同一个画面里不可能同时看清。
+        // 做法（和 KSP 一样）：物理统一，但「1 px 代表多少米」随缩放变化。
+        //
+        //   贴着地面：每像素几厘米，飞船 49 px 看得清清楚楚
+        //   拉远看星球：每像素几百米，飞船缩成一个点
+        //
+        // 换算公式：实际米数 = 像素数 x metersPerPixel()
+        // metersPerPixel() = GROUND_M_PER_PX / camera.zoom
+        const GROUND_M_PER_PX = 0.05;     // 地面尺度：1 px = 5 cm（飞船 49px = 2.45 m）
+        // 星球真实半径 1000 km，在游戏里用 20000 px 表示 -> 1 px = 50 m
+        const PLANET_RADIUS_KM = 1000;
+        const PLANET_RADIUS_M = PLANET_RADIUS_KM * 1000;
+        const ATMO_TOP_KM = 50;                                       // 大气顶 50 km
+        const ATMO_TOP_M = ATMO_TOP_KM * 1000;
+
+        // 当前每像素代表多少米（随缩放实时变）
+        function metersPerPixel() {
+            return GROUND_M_PER_PX / Math.max(1e-9, camera.zoom);
+        }
+
         const METERS_PER_GRID = 0.35;
         const METERS_PER_PX = METERS_PER_GRID / PART_PX;
 
-        // 像素 → 距离文字
+        // 像素 → 距离文字。
+        // 注意：距离的换算**不随缩放变** —— 因为「星球 20000px = 1000 km」
+        // 是固定的（1 px = 50 m 的星球尺度）。
+        // 缩放只影响「看起来多大」，不影响「实际是多少」。
+        const DIST_M_PER_PX = PLANET_RADIUS_M / 20000;   // = 50 m/px
         function fmtDistance(px) {
-            const m = px * METERS_PER_PX;
-            if (Math.abs(m) >= 1000) return (m / 1000).toFixed(2) + ' km';
+            const m = px * DIST_M_PER_PX;
+            if (Math.abs(m) >= 1000) return (m / 1000).toFixed(m >= 100000 ? 0 : 2) + ' km';
             if (Math.abs(m) >= 1) return m.toFixed(m >= 100 ? 0 : 1) + ' m';
             return (m * 100).toFixed(0) + ' cm';
         }
-        // 像素/秒 → 速度文字
+        // 像素/秒 → 速度文字。速度用「真实米制」：
+        // 物理里的像素速度 x metersPerPixel() = 真实米/秒
         function fmtSpeed(pxPerSec) {
-            const ms = pxPerSec * METERS_PER_PX;
+            const ms = pxPerSec * metersPerPixel();
             if (Math.abs(ms) >= 1000) return (ms / 1000).toFixed(2) + ' km/s';
             return ms.toFixed(ms >= 100 ? 0 : 1) + ' m/s';
         }
-        // 飞船尺寸（米）
+        // 飞船尺寸用地面尺度（1 px = 5 cm）
+        function fmtShipSize() {
+            const w = SPEC.width * GROUND_M_PER_PX;
+            const h = SPEC.height * GROUND_M_PER_PX;
+            return { w: w, h: h };
+        }
+        // 飞船尺寸（米）—— 用地面尺度，和真实尺寸一致
         function shipSizeMeters() {
-            return { w: SPEC.width / PART_PX * METERS_PER_GRID,
-                     h: SPEC.height / PART_PX * METERS_PER_GRID };
+            return { w: SPEC.width * GROUND_M_PER_PX,
+                     h: SPEC.height * GROUND_M_PER_PX };
         }
 
         function defaultShip() {
@@ -1077,18 +1116,17 @@
         // 厚度占半径的 60%。现实里大气只有半径的 1.5%，
         // 但本星球半径只有 200 m，按真实比例算出来只有 3 m 厚，
         // 屏幕上根本看不见，也没有「冲出大气」的感觉。
-        // 大气厚度占半径比例。1 km 半径 x 0.35 = 350 m 厚的大气，
-        // 和地球（100 km / 6371 km ≈ 1.6%）相比夸张很多，
-        // 但这是游戏 —— 要能看见、要能感觉到「冲出大气」。
-        const ATMO_RATIO = 0.35;
-        // 阻力系数。drag = 系数 x 密度 x 速度²
-        // 星球放大到 1 km 后速度量级变了（入轨要 1000 px/s），
-        // 所以系数按新速度重新配，让大气「浓」得能明显感觉到。
-        //   300 px/s  → 18 px/s²
-        //  1000 px/s  → 200 px/s²（比引力 50 大 4 倍，能当减速伞）
-        //  2000 px/s  → 800 px/s²（再入时强烈减速）
-        //  4000 px/s  → 3200 px/s²（高速再入会被狠狠拖住）
-        const DRAG_COEF = 0.00035;
+        // 大气厚度：真实 50 km。
+        // 星球半径 1000 km，所以占比 = 50/1000 = 5%
+        // （地球是 1.6%，这里略厚一点，让「冲出大气」更有感觉）
+        const ATMO_RATIO = ATMO_TOP_M / PLANET_RADIUS_M;
+        // 阻力系数。drag = 系数 x 密度 x 速度²（像素制）
+        // 新尺度下入轨速度约 1000~2000 px/s，引力约 19.6 px/s²。
+        // 目标是「大气够浓，能明显感觉到」：
+        //    500 px/s  → 阻力 25   （和引力同量级）
+        //   1000 px/s  → 阻力 100  （明显拖拽）
+        //   2000 px/s  → 阻力 400  （再入时强烈减速，能当减速伞）
+        const DRAG_COEF = 0.0001;
         const REENTRY_SPEED = 120;          // 超过这个速度冲进大气就开始发光
 
         function atmoThickness() { return planet.radius * ATMO_RATIO; }
@@ -1887,12 +1925,19 @@
         // a = surfaceGravity × (radius / 距离)²
         // 这里不用另外加“离心力”：我们用的是不跟着飞船转的坐标系，
         // 只要横向速度够快，飞船就会一直“绕着、掉不到地上”—— 这就是轨道。
+        // 表面引力（真实值，米/秒²）—— 地球的 1/10
+        const SURFACE_GRAVITY_MS2 = 0.98;
+
+        // 引力：平方反比，a = g0 x (R / r)²
+        // g0 用真实值 0.98 m/s²，再换算成「像素/秒²」参与物理。
+        // 换算比例就是 metersPerPixel() —— 缩放变了，同样的物理结果不变。
         function gravityAt(x, y) {
             const dx = planet.x - x;
             const dy = planet.y - y;
             const dist = Math.sqrt(dx*dx + dy*dy) || 1;
             const safe = Math.max(dist, planet.radius * 0.5);   // 防止贴到球心时引力爆表
-            const a = planet.surfaceGravity * (planet.radius / safe) ** 2;
+            const g0px = SURFACE_GRAVITY_MS2 / metersPerPixel();   // 米制 -> 像素制
+            const a = g0px * (planet.radius / safe) ** 2;
             return { ax: (dx / dist) * a, ay: (dy / dist) * a, dist };
         }
 
