@@ -842,6 +842,49 @@
         const DESTROY_SPEED = 420;    // 超过这个速度，撞在哪儿哪儿直接炸
         const PART_HP = { capsule: 70, tank: 110, engine: 90 };
 
+        // ==================== 大气层 ====================
+        // 星球外面包一层大气：有阻力、有再入发光。
+        // 厚度按半径的 15% 算（现实里只有 1.5%，但那样在屏幕上根本看不见）。
+        // 厚度占半径的 60%。现实里大气只有半径的 1.5%，
+        // 但本星球半径只有 200 m，按真实比例算出来只有 3 m 厚，
+        // 屏幕上根本看不见，也没有「冲出大气」的感觉。
+        const ATMO_RATIO = 0.60;            // 大气厚度占星球半径的比例
+        const DRAG_COEF = 0.000010;         // 阻力系数（调大 = 空气更稠、掉得更快）
+        const REENTRY_SPEED = 120;          // 超过这个速度冲进大气就开始发光
+
+        function atmoThickness() { return planet.radius * ATMO_RATIO; }
+
+        // HUD 上那行大气状态文字
+        function atmoStatusText() {
+            const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
+            const alt = r - planet.radius;
+            const h = atmoThickness();
+            if (alt >= h) return '已飞出大气层 🌌';
+            const pct = Math.round(atmosphereDensity(rocket.x, rocket.y) * 100);
+            return `大气层内（空气密度 ${pct}%，层顶 ${fmtDistance(h)}）`;
+        }
+
+        // 某处的大气密度：0 = 真空，1 = 贴着地面
+        function atmosphereDensity(x, y) {
+            const r = Math.hypot(x - planet.x, y - planet.y);
+            const alt = r - planet.radius;
+            const h = atmoThickness();
+            if (alt >= h || alt < 0) return 0;
+            // 下半段稠密、上半段稀薄（用平方让过渡更自然）
+            const t = 1 - alt / h;
+            return t * t;
+        }
+
+        // 当前飞船所在位置的大气密度
+        function myAtmosphere() {
+            return atmosphereDensity(rocket.x, rocket.y);
+        }
+        // 是否已经飞出大气
+        function inSpace() {
+            const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
+            return (r - planet.radius) >= atmoThickness();
+        }
+
         let wreckedCount = 0;         // 这一趟撞炸了几个部件
         let debris = [];              // 爆炸碎片（纯视觉）
 
@@ -1238,6 +1281,23 @@
                 rocket.vy += -Math.sin(a) * power * dt;
             }
 
+            // ---- 空气阻力：只在大气层内有效，速度越快、密度越大，减速越狠 ----
+            const dens = atmosphereDensity(rocket.x, rocket.y);
+            let heating = 0;
+            if (dens > 0) {
+                const sp = Math.hypot(rocket.vx, rocket.vy);
+                if (sp > 1) {
+                    const drag = DRAG_COEF * dens * sp * sp;
+                    rocket.vx -= (rocket.vx / sp) * drag * dt;
+                    rocket.vy -= (rocket.vy / sp) * drag * dt;
+                }
+                // 再入加热：高速冲进稠密大气
+                if (sp > REENTRY_SPEED) {
+                    heating = Math.min(1, (sp - REENTRY_SPEED) / 400) * dens * 3;
+                }
+            }
+            rocket.heat = heating;
+
             rocket.x += rocket.vx * dt;
             rocket.y += rocket.vy * dt;
 
@@ -1369,25 +1429,16 @@
         function predictPath() {
             let px = rocket.x, py = rocket.y;
             let pvx = rocket.vx, pvy = rocket.vy;
-            const firing = rocket.state === 'firing' && rocket.throttle > 0;
-            const thrustAngle = rocket.angle * Math.PI / 180;
-            let pfuel = rocket.fuel;   // 预测里燃料也会减少、飞船也会变轻
             const points = [px, py];
 
             let sweep = 0;   // 已经绕星球转过的角度
             let prevAng = Math.atan2(py - planet.y, px - planet.x);
 
             for (let i = 0; i < PREDICT_MAX_STEPS; i++) {
+                // 只有引力 —— 纯惯性轨道（关机后会走的路）
                 const g = gravityAt(px, py);
                 pvx += g.ax * FIXED_DT;
                 pvy += g.ay * FIXED_DT;
-                if (firing && pfuel > 0) {
-                    // 预测里也用当前（正在变轻的）质量，虚线才和实际轨迹对得上
-                    const pPower = thrustAccel(pfuel, rocket.throttle);
-                    pvx += -Math.cos(thrustAngle) * pPower * FIXED_DT;
-                    pvy += -Math.sin(thrustAngle) * pPower * FIXED_DT;
-                    pfuel = Math.max(0, pfuel - rocket.throttle * FIXED_DT / FUEL_BURN_SECONDS);
-                }
                 px += pvx * FIXED_DT;
                 py += pvy * FIXED_DT;
 
@@ -1624,6 +1675,30 @@
             ctx.lineWidth = 2 / camera.zoom;
             ctx.stroke();
 
+            // ---- 大气层：星球外面一圈由内到外的渐变光晕 ----
+            {
+                const h = atmoThickness();
+                const atmoGrad = ctx.createRadialGradient(
+                    planet.x, planet.y, planet.radius,
+                    planet.x, planet.y, planet.radius + h
+                );
+                atmoGrad.addColorStop(0.00, 'rgba(120, 190, 255, 0.42)');
+                atmoGrad.addColorStop(0.35, 'rgba(90, 160, 235, 0.20)');
+                atmoGrad.addColorStop(0.70, 'rgba(70, 130, 210, 0.08)');
+                atmoGrad.addColorStop(1.00, 'rgba(60, 110, 190, 0.00)');
+                ctx.beginPath();
+                ctx.arc(planet.x, planet.y, planet.radius + h, 0, Math.PI * 2);
+                ctx.fillStyle = atmoGrad;
+                ctx.fill();
+                // 大气顶（一条淡淡的边，方便判断"出大气了没"）
+                ctx.beginPath();
+                ctx.arc(planet.x, planet.y, planet.radius + h, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(120, 190, 255, 0.28)';
+                ctx.lineWidth = 1.5 / camera.zoom;
+                ctx.setLineDash([]);
+                ctx.stroke();
+            }
+
             // 轨道预测线（蓝色虚线，像 SFS 里那条线）
             const path = predictPath();
             if (path.length >= 4) {
@@ -1661,6 +1736,21 @@
             ctx.rotate((rocket.angle - 90) * Math.PI / 180);
             ctx.translate(-SPEC.com.x, -SPEC.com.y);
             drawShip(ctx, rocket.state === 'firing' && rocket.fuel > 0, performance.now());
+
+            // ---- 再入加热：高速冲进大气时，船体外面裹一层火光 ----
+            const heat = rocket.heat || 0;
+            if (heat > 0.01) {
+                ctx.globalAlpha = Math.min(0.85, heat);
+                const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, SPEC.height * 0.9);
+                glow.addColorStop(0.0, 'rgba(255, 240, 190, 0.95)');
+                glow.addColorStop(0.4, 'rgba(255, 150, 40, 0.60)');
+                glow.addColorStop(1.0, 'rgba(255, 80, 0, 0.00)');
+                ctx.beginPath();
+                ctx.arc(0, 0, SPEC.height * 0.9, 0, Math.PI * 2);
+                ctx.fillStyle = glow;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
             ctx.restore();
 
             ctx.restore();
@@ -1766,7 +1856,7 @@
 
             hud.innerText =
                 `速度: ${fmtSpeed(speedNum)} | 状态: ${statusText} | 角度: ${Math.round(rocket.angle)}° | 缩放: ${camera.zoom.toFixed(2)}x\n` +
-                `高度: ${fmtDistance(surfaceDist)} | 距球心: ${fmtDistance(centerDist)}（星球半径 ${fmtDistance(planet.radius)}）\n` +
+                `高度: ${fmtDistance(surfaceDist)} | ${atmoStatusText()}${(rocket.heat || 0) > 0.05 ? '  🔥 再入加热中' : ''}\n` +
                 orbitLine + '\n' +
                 `圆轨道速度: ${fmtSpeed(vCirc)} | 逃逸速度: ${fmtSpeed(vEsc)}` + orbitHint + '\n' +
                 `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m | 质量: ${shipMass(rocket.fuel).toFixed(0)} 单位` + '\n' +
