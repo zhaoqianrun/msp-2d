@@ -2237,9 +2237,16 @@
         // ==== 轨道预测线（虚线）====
         // 拿“当前位置 + 当前速度 + 当前发动机状态”往前算，画出未来的飞行轨迹。
         // 一直绕着星球转 = 你入轨了；一头扎进星球 = 你会掉下去。
-        const PREDICT_SECONDS = 180;                       // 最多预测 180 秒（绕满一圈就提前收工）
+        // 预测时长。新尺度下飞船速度是 1000+ px/s，
+        // 180 秒能飞 18 万 px（9 个星球半径），画出来又长又乱。
+        // 改成 60 秒 —— 足够看清「会不会撞地 / 能不能入轨」，
+        // 而且绕星球一圈通常也就一两分钟。
+        const PREDICT_SECONDS = 60;
         const PREDICT_MAX_STEPS = PREDICT_SECONDS / FIXED_DT;
-        const PREDICT_SAMPLE = 3;                          // 每 3 步记一个点，够平滑
+        // 每多少步记一个点。60 秒 = 3600 步，
+        // 每 3 步一点是 1200 个点，画虚线太浪费（而且看着糊）。
+        // 改成每 12 步一点 -> 300 个点，视觉上完全够平滑。
+        const PREDICT_SAMPLE = 12;
 
         function predictPath() {
             let px = rocket.x, py = rocket.y;
@@ -2250,18 +2257,39 @@
             let prevAng = Math.atan2(py - planet.y, px - planet.x);
 
             for (let i = 0; i < PREDICT_MAX_STEPS; i++) {
-                // 只有引力 —— 纯惯性轨道（关机后会走的路）
+                // 引力
                 const g = gravityAt(px, py);
                 pvx += g.ax * FIXED_DT;
                 pvy += g.ay * FIXED_DT;
+
+                // 大气阻力 —— 关键！之前预测里没有阻力，
+                // 所以在大气内飞的时候，虚线会明显偏离实际轨迹（预测得太远）。
+                // 现在和 physicsStep 用同一套力，虚线和实际就能对上了。
+                const pdens = atmosphereDensity(px, py);
+                if (pdens > 0) {
+                    const psp = Math.hypot(pvx, pvy);
+                    if (psp > 1) {
+                        const pdrag = DRAG_COEF * pdens * psp * psp;
+                        pvx -= (pvx / psp) * pdrag * FIXED_DT;
+                        pvy -= (pvy / psp) * pdrag * FIXED_DT;
+                    }
+                }
+
                 px += pvx * FIXED_DT;
                 py += pvy * FIXED_DT;
 
-                if (i % PREDICT_SAMPLE === 0) points.push(px, py);
+                if (i % PREDICT_SAMPLE === 0) {
+                    points.push(px, py);
+                    // 点数上限（600 个点 = 300 个坐标对），防止拖慢渲染
+                    if (points.length > 600) break;
+                }
 
                 const d = Math.hypot(px - planet.x, py - planet.y);
-                if (d < planet.radius + 8) break;              // 会撞到地面，线就画到这儿
-                if (d > planet.radius * 8) break;              // 飞得太远，不用画了
+                // 撞到地面就收笔（新尺度下「贴地」是几百米 = 几个像素，
+                // 但这里留一点余量，避免线头扎进星球里）
+                if (d < planet.radius + planet.radius * 0.002) break;
+                // 飞得比 3 个星球半径还远就不用画了（再远也看不出轨道）
+                if (d > planet.radius * 3) break;
 
                 // 已经绕满一整圈就收工：这样入轨时虚线正好闭合成一个环
                 const ang = Math.atan2(py - planet.y, px - planet.x);
