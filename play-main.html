@@ -1121,24 +1121,38 @@
         // （地球是 1.6%，这里略厚一点，让「冲出大气」更有感觉）
         const ATMO_RATIO = ATMO_TOP_M / PLANET_RADIUS_M;
         // 阻力系数。drag = 系数 x 密度 x 速度²（像素制）
-        // 新尺度下入轨速度约 1000~2000 px/s，引力约 19.6 px/s²。
-        // 目标是「大气够浓，能明显感觉到」：
-        //    500 px/s  → 阻力 25   （和引力同量级）
-        //   1000 px/s  → 阻力 100  （明显拖拽）
-        //   2000 px/s  → 阻力 400  （再入时强烈减速，能当减速伞）
-        const DRAG_COEF = 0.0001;
+        // 密度改成指数衰减后，高空仍有稀薄阻力，所以系数比之前小一点，
+        // 免得「飞很高了还像在糖浆里」。
+        //   地面 1000 px/s  → 阻力 80
+        //   20 km 密度 33%  → 阻力 26
+        //   50 km 密度 4%   → 阻力 3（能感觉到一点点，但基本自由）
+        const DRAG_COEF = 0.00008;
         const REENTRY_SPEED = 120;          // 超过这个速度冲进大气就开始发光
 
         function atmoThickness() { return planet.radius * ATMO_RATIO; }
 
         // HUD 上那行大气状态文字
+        // 大气状态文字。
+        // 大气改成指数衰减后，不再有「内 / 外」这种硬边界 ——
+        // 所以改成显示**密度等级**，玩家能看到阻力是渐渐消失的。
         function atmoStatusText() {
             const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
             const alt = r - planet.radius;
-            const h = atmoThickness();
-            if (alt >= h) return '已飞出大气层 🌌';
-            const pct = Math.round(atmosphereDensity(rocket.x, rocket.y) * 100);
-            return `大气层内（空气密度 ${pct}%，层顶 ${fmtDistance(h)}）`;
+            const d = atmosphereDensity(rocket.x, rocket.y);
+            const pct = d * 100;
+            const altKm = (alt * DIST_M_PER_PX / 1000);
+
+            if (d <= 0.0005) return '真空（无阻力）🌌';
+
+            // 按密度给个直观的描述
+            let label;
+            if (pct >= 70) label = '稠密';
+            else if (pct >= 30) label = '稀薄';
+            else if (pct >= 8) label = '很稀薄';
+            else if (pct >= 2) label = '接近真空';
+            else label = '几乎真空';
+
+            return `大气 ${label}（密度 ${pct < 1 ? pct.toFixed(1) : Math.round(pct)}%，高度 ${altKm < 10 ? altKm.toFixed(1) : Math.round(altKm)} km）`;
         }
 
         // 顶部「本航天器还剩什么零件」
@@ -1186,14 +1200,40 @@
 
 
         // 某处的大气密度：0 = 真空，1 = 贴着地面
+        // 大气密度：真实大气是**指数衰减**的，不是到某个高度突然消失。
+        // 以前用 (1 - alt/h)² —— 到 50 km 直接归零，
+        // 结果「一出大气阻力就完全消失」，很突兀。
+        //
+        // 现在：density = exp(-alt / SCALE_HEIGHT)
+        //   SCALE_HEIGHT 是「标高」：每上升这么多，密度降到 1/e
+        //   地球的对流层标高约 8.5 km，这里取 9 km，和真实接近
+        //
+        // 好处：
+        //   · 没有硬边界，飞到哪儿都有（很稀薄的）空气
+        //   · 低空密度接近 1，高空指数下降，过渡自然
+        //   · 「大气层顶」变成一个参考线（50 km），不再是物理墙
+        // 标高取 16 km（地球真实是 8.5 km）。
+        // 取大一点的理由：真实大气到 50 km 只剩 0.3%，
+        // 游戏里那样「等于没有」，玩家会觉得「一出大气阻力就消失」。
+        // 16 km 时：
+        //    10 km 密度 53%
+        //    20 km 密度 29%
+        //    30 km 密度 15%
+        //    50 km 密度  4.4%   <- 还有一点感觉
+        //    80 km 密度  0.7%   <- 几乎自由，但没断崖
+        //   120 km 密度  0.1%
+        const ATMO_SCALE_HEIGHT = 16000 / DIST_M_PER_PX;   // 16 km 换算成像素
+        const ATMO_FADE_KM = 250;                          // 250 km 以上完全忽略（性能 + 数值）
+
         function atmosphereDensity(x, y) {
             const r = Math.hypot(x - planet.x, y - planet.y);
             const alt = r - planet.radius;
-            const h = atmoThickness();
-            if (alt >= h || alt < 0) return 0;
-            // 下半段稠密、上半段稀薄（用平方让过渡更自然）
-            const t = 1 - alt / h;
-            return t * t;
+            if (alt < 0) return 1;
+            // 200 km 以上当作真空（真实大气到那儿也基本没了）
+            if (alt * DIST_M_PER_PX > ATMO_FADE_KM * 1000) return 0;
+            // 指数衰减
+            const d = Math.exp(-alt / ATMO_SCALE_HEIGHT);
+            return d > 1 ? 1 : d;
         }
 
         // 当前飞船所在位置的大气密度
@@ -1209,10 +1249,9 @@
             return `  🔥 ${t ? t.name : '部件'} ${Math.round(h.temp)}°C / ${h.limit}°C（${pct}%）`;
         }
 
-        // 是否已经飞出大气
+        // 是否算「已在太空」：密度低到可以忽略（不再用硬边界）
         function inSpace() {
-            const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
-            return (r - planet.radius) >= atmoThickness();
+            return atmosphereDensity(rocket.x, rocket.y) < 0.005;
         }
 
         // ==================== 统一航天器抽象 ====================
@@ -2430,28 +2469,38 @@
             ctx.lineWidth = 2 / camera.zoom;
             ctx.stroke();
 
-            // ---- 大气层：星球外面一圈由内到外的渐变光晕 ----
+            // ---- 大气层：由内到外指数衰减的渐变光晕 ----
+            // 大气改成指数模型后，视觉上也跟着来：
+            // 用多层渐变模拟 exp(-alt/H)，而不是「一整块蓝色到边界截断」。
+            // 最外面画到 3 倍标高（密度约 5%），看着就是「渐渐消失」。
             {
-                const h = atmoThickness();
+                const h = ATMO_SCALE_HEIGHT;             // 标高
+                const outer = Math.min(atmoThickness() * 1.6, h * 6);   // 画到多远
                 const atmoGrad = ctx.createRadialGradient(
                     planet.x, planet.y, planet.radius,
-                    planet.x, planet.y, planet.radius + h
+                    planet.x, planet.y, planet.radius + outer
                 );
-                atmoGrad.addColorStop(0.00, 'rgba(120, 190, 255, 0.42)');
-                atmoGrad.addColorStop(0.35, 'rgba(90, 160, 235, 0.20)');
-                atmoGrad.addColorStop(0.70, 'rgba(70, 130, 210, 0.08)');
-                atmoGrad.addColorStop(1.00, 'rgba(60, 110, 190, 0.00)');
+                // 按 exp 曲线布色标，越往外越透明
+                for (let i = 0; i <= 8; i++) {
+                    const f = i / 8;
+                    const altPx = outer * f;
+                    const dens = Math.exp(-altPx / h);
+                    const alpha = 0.40 * dens;
+                    atmoGrad.addColorStop(f, 'rgba(120, 190, 255, ' + alpha.toFixed(3) + ')');
+                }
                 ctx.beginPath();
-                ctx.arc(planet.x, planet.y, planet.radius + h, 0, Math.PI * 2);
+                ctx.arc(planet.x, planet.y, planet.radius + outer, 0, Math.PI * 2);
                 ctx.fillStyle = atmoGrad;
                 ctx.fill();
-                // 大气顶（一条淡淡的边，方便判断"出大气了没"）
+
+                // 参考线：50 km（大气顶），帮助判断「出大气了没」
                 ctx.beginPath();
-                ctx.arc(planet.x, planet.y, planet.radius + h, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(120, 190, 255, 0.28)';
-                ctx.lineWidth = 1.5 / camera.zoom;
-                ctx.setLineDash([]);
+                ctx.arc(planet.x, planet.y, planet.radius + atmoThickness(), 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(120, 190, 255, 0.22)';
+                ctx.lineWidth = 1.2 / camera.zoom;
+                ctx.setLineDash([6 / camera.zoom, 8 / camera.zoom]);
                 ctx.stroke();
+                ctx.setLineDash([]);
             }
 
             // 轨道预测线（蓝色虚线，像 SFS 里那条线）
