@@ -500,6 +500,19 @@
         let shipDef = loadShipLocal();
 
         // 从部件算出：空船质量、燃料容量、总推力、包围盒
+        // 活着的部件算出来的燃料容量（炸掉的箱子不再提供容量）
+        function aliveFuelCap() {
+            let cap = 0;
+            for (const p of shipDef.parts) {
+                if (destroyed.has(p.id)) continue;
+                const t = PART_TYPES[p.type];
+                if (t) cap += t.fuel;
+            }
+            return cap;
+        }
+        // 注意：SPEC.fuelCap 是「按当时还活着的部件」算的，
+        // 所以炸掉箱子后 SPEC 重算一次才是准的 —— splitVessel 里会做。
+
         function shipSpec(def) {
             let dryMass = 0, fuelCap = 0, thrust = 0;
             let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
@@ -648,7 +661,7 @@
         //   燃料质量 = Σ 燃料箱容量
         //   总推力   = Σ 发动机推力
         // 燃料烧掉多少，质量就减轻多少 —— 这就是「燃料减少，重量也减少」。
-        const SPEC = shipSpec(shipDef);
+        let SPEC = shipSpec(shipDef);   // 分离后要重算，所以是 let
         const DRY_MASS = SPEC.dryMass;
         const FUEL_MASS = SPEC.fuelCap;
         const FULL_THRUST = SPEC.thrust;
@@ -676,6 +689,8 @@
             { id: 'burned_up',         name: '火烧眉毛',   desc: '再入时部件被高温烧毁' },
             { id: 'capsule_survives',  name: '返回舱幸存', desc: '其它部件全烧光，控制舱还挺着' },
             { id: 'meteor',            name: '流星',       desc: '以超过 400 px/s 冲进大气层' },
+            { id: 'split_vessel',      name: '断成两截',   desc: '飞船在太空中分离成多个航天器' },
+            { id: 'derelict_keeper',   name: '太空垃圾场', desc: '同时存在 3 个以上航天器' },
             { id: 'refuel_full',   name: '补给完毕',   desc: '在地面上把燃料加满' },
             { id: 'dump_half',     name: '减负',       desc: '在地面上卸掉一半以上的燃料' },
             { id: 'save_game',     name: '存档习惯',   desc: '用 S 存一次档' },
@@ -925,6 +940,7 @@
             if (blew > 0) {
                 heatWrecked += blew;
                 unlock('burned_up');
+                checkSeparation();
                 // 其它都烧光了，只剩控制舱
                 const others = shipDef.parts.filter(p => p.type !== 'capsule');
                 if (others.length > 0 &&
@@ -1005,6 +1021,63 @@
             return (r - planet.radius) >= atmoThickness();
         }
 
+        // ==================== 多航天器 ====================
+        // 中间炸断之后，飞船会分离成好几截，每截都是独立航天器。
+        // 为了不动那 147 处 rocket.xxx 的代码，这里保持一个约定：
+        //   · rocket         = 当前正在操控的那一艘（有控制舱的）
+        //   · vessels[]      = 全部航天器（包含 rocket 自己）
+        //   · 失控的那些每帧只跑引力和惯性，不能操控
+        let vessels = [];
+        let activeVesselId = null;
+
+        function makeVessel(parts, x, y, vx, vy, angle, fuel) {
+            const def = { version: 1, name: '', parts: parts };
+            const spec = shipSpec(def);
+            return {
+                id: 'v' + (vesselSeq++),
+                def: def,
+                spec: spec,
+                x: x, y: y, vx: vx, vy: vy, angle: angle,
+                fuel: fuel,
+                throttle: 1,
+                state: 'idle',
+                landed: false,
+                heat: 0,
+                partHP: (function () { const h = {}; for (const p of parts) h[p.id] = PART_HP[p.type] || 80; return h; })(),
+                partTemp: (function () { const t = {}; for (const p of parts) t[p.id] = AMBIENT_TEMP; return t; })(),
+                destroyed: new Set(),
+            };
+        }
+        let vesselSeq = 1;
+
+        // 这艘船还有控制舱吗
+        function vesselHasCapsule(v) {
+            return v.def.parts.some(p => p.type === 'capsule' && !v.destroyed.has(p.id));
+        }
+        // 这艘船还有发动机吗
+        function vesselHasEngine(v) {
+            return v.def.parts.some(p => p.type === 'engine' && !v.destroyed.has(p.id));
+        }
+        // 这艘船的存活部件数
+        function vesselAliveParts(v) {
+            return v.def.parts.filter(p => !v.destroyed.has(p.id)).length;
+        }
+        // 这艘船当前的质量
+        function vesselMass(v) {
+            let dry = 0, cap = 0, thrust = 0;
+            for (const p of v.def.parts) {
+                if (v.destroyed.has(p.id)) continue;
+                const t = PART_TYPES[p.type];
+                if (!t) continue;
+                dry += t.mass; cap += t.fuel; thrust += t.thrust;
+            }
+            return { dry, cap, thrust, total: dry + cap * v.fuel };
+        }
+        // 这艘船能不能被操控
+        function vesselControllable(v) {
+            return v && vesselHasCapsule(v) && !v.landed ? true : (v ? vesselHasCapsule(v) : false);
+        }
+
         let wreckedCount = 0;         // 这一趟撞炸了几个部件
         let debris = [];              // 爆炸碎片（纯视觉）
 
@@ -1057,10 +1130,34 @@
             return blew;
         }
 
-        // 爆炸：生成碎片
+        // 炸完之后检查：船是不是断成几截了
+        function checkSeparation() {
+            if (findConnectedGroups(shipDef.parts, destroyed).length > 1) {
+                splitVessel();
+                if (vessels.length >= 3) unlock('derelict_keeper');
+            }
+        }
+
+        // 爆炸：生成碎片；燃料箱炸了还会把里面的油一起烧掉
         function blowUpPart(p) {
             const t = PART_TYPES[p.type];
             if (!t) return;
+
+            // 燃料箱被炸 → 它装的那部分油也没了。
+            // 按「这个箱子占总燃料容量的比例」从当前油量里扣掉。
+            if (t.fuel > 0 && SPEC.fuelCap > 0) {
+                const share = t.fuel / SPEC.fuelCap;
+                const lost = rocket.fuel * share;   // 当前油量里属于这个箱子的部分
+                rocket.fuel = Math.max(0, rocket.fuel - lost);
+                if (lost > 0.001) {
+                    toastQueue.push({
+                        title: '燃 料 损 失',
+                        name: `燃料箱炸了，掉了 ${Math.round(lost * 100)}% 油`,
+                        desc: `剩余燃料 ${Math.round(rocket.fuel * 100)}%`,
+                    });
+                }
+                if (rocket.fuel <= 0 && rocket.state === 'firing') rocket.state = 'idle';
+            }
             const P = PART_PX;
             const cx = (p.x + t.w / 2 - SPEC.centerX) * P;
             const cy = (SPEC.box.maxY - (p.y + t.h / 2)) * P;
@@ -1092,6 +1189,156 @@
                 d.vy += g.ay * dt;
             }
             if (debris.length > 400) debris.splice(0, debris.length - 400);
+        }
+
+        // ==================== 分离 ====================
+        // 中间炸断了，船就断成两截（甚至更多）。
+        // 用「并查集」找出哪些部件还连在一起 —— 挨着的算同一截。
+        function findConnectedGroups(parts, destroyed) {
+            const alive = parts.filter(p => !destroyed.has(p.id));
+            const parent = {};
+            for (const p of alive) parent[p.id] = p.id;
+            function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+            function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; }
+
+            // 两个部件的格子区域是否相邻（含重叠）
+            function touching(a, b) {
+                const ta = PART_TYPES[a.type], tb = PART_TYPES[b.type];
+                if (!ta || !tb) return false;
+                const aL = a.x, aR = a.x + ta.w, aB = a.y, aT = a.y + ta.h;
+                const bL = b.x, bR = b.x + tb.w, bB = b.y, bT = b.y + tb.h;
+                // 允许 1 格容差（斜对角也算连着）
+                return aL <= bR + 1 && aR >= bL - 1 && aB <= bT + 1 && aT >= bB - 1;
+            }
+
+            for (let i = 0; i < alive.length; i++) {
+                for (let j = i + 1; j < alive.length; j++) {
+                    if (touching(alive[i], alive[j])) union(alive[i].id, alive[j].id);
+                }
+            }
+            const groups = {};
+            for (const p of alive) {
+                const r = find(p.id);
+                (groups[r] = groups[r] || []).push(p);
+            }
+            return Object.values(groups);
+        }
+
+        // 把当前飞船按「还连在一起的部件」拆成若干航天器
+        // 返回新产生的那些（不含仍然操控中的那艘）
+        function splitVessel() {
+            const groups = findConnectedGroups(shipDef.parts, destroyed);
+            if (groups.length <= 1) return [];
+
+            // 挑出有控制舱的那组当主角；没有就挑最大的那组
+            let mainIdx = groups.findIndex(g => g.some(p => p.type === 'capsule'));
+            if (mainIdx < 0) {
+                let best = 0;
+                groups.forEach((g, i) => { if (g.length > groups[best].length) best = i; });
+                mainIdx = best;
+            }
+
+            const born = [];
+            groups.forEach((g, i) => {
+                if (i === mainIdx) {
+                    // 主控那截：留在 rocket 里继续用
+                    shipDef = { version: 1, name: shipDef.name, parts: g };
+                    SPEC = shipSpec(shipDef);
+                    // 燃料容量变了：油量按「占新容量的比例」重新归一
+                    const newCap = g.reduce((s, p) => s + (PART_TYPES[p.type] ? PART_TYPES[p.type].fuel : 0), 0);
+                    const oldCap = SPEC.fuelCap || 1;
+                    rocket.fuel = Math.max(0, Math.min(1, rocket.fuel * oldCap / Math.max(1e-6, newCap)));
+                    // 同步更新登记在 vessels 里的主船记录
+                    for (const v of vessels) {
+                        if (v.id === activeVesselId) {
+                            v.def = shipDef;
+                            v.spec = SPEC;
+                        }
+                    }
+                    return;
+                }
+                // 其它截：变成失控的航天器，按质心位置分开一点点
+                const spec = shipSpec({ version: 1, parts: g });
+                // 相对主控的偏移 → 世界坐标
+                const offX = (spec.centerX - SPEC.centerX) * PART_PX;
+                const offY = -(spec.com.y - SPEC.com.y);
+                const a = (rocket.angle - 90) * Math.PI / 180;
+                const wx = rocket.x + offX * Math.cos(a);
+                const wy = rocket.y + offX * Math.sin(a);
+                const v = makeVessel(g, wx, wy, rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
+                vessels.push(v);
+                born.push(v);
+            });
+
+            // 分离本身给两边一点推开的力
+            const push = 30;
+            rocket.vx += (Math.random() - 0.5) * push;
+            rocket.vy += (Math.random() - 0.5) * push;
+            for (const v of born) {
+                v.vx -= (Math.random() - 0.5) * push;
+                v.vy -= (Math.random() - 0.5) * push;
+            }
+
+            toastQueue.push({
+                title: '结 构 分 离',
+                name: '飞船断成 ' + groups.length + ' 截',
+                desc: born.length + ' 截失控，只有带控制舱的那截能操控',
+            });
+            unlock('split_vessel');
+            if (vessels.length >= 3) unlock('derelict_keeper');
+            return born;
+        }
+
+        // 更新那些失控的航天器（只有引力和惯性，不能操控）
+        function updateDerelicts(dt) {
+            for (const v of vessels) {
+                if (v.id === activeVesselId) continue;
+                if (v.landed) continue;
+                const g = gravityAt(v.x, v.y);
+                v.vx += g.ax * dt;
+                v.vy += g.ay * dt;
+                // 大气阻力
+                const dens = atmosphereDensity(v.x, v.y);
+                if (dens > 0) {
+                    const sp = Math.hypot(v.vx, v.vy);
+                    if (sp > 1) {
+                        const drag = DRAG_COEF * dens * sp * sp;
+                        v.vx -= (v.vx / sp) * drag * dt;
+                        v.vy -= (v.vy / sp) * drag * dt;
+                    }
+                }
+                v.x += v.vx * dt;
+                v.y += v.vy * dt;
+                // 撞地就停住
+                const hit = lowestCollisionPointFor(v, v.angle);
+                if (hit && hit.dist > 0 && hit.dist < planet.radius) {
+                    const push = planet.radius - hit.dist;
+                    const ux = (hit.world.x - planet.x) / hit.dist;
+                    const uy = (hit.world.y - planet.y) / hit.dist;
+                    v.x += ux * push;
+                    v.y += uy * push;
+                    v.vx *= -0.15;
+                    v.vy *= -0.15;
+                    if (Math.hypot(v.vx, v.vy) < 12) {
+                        v.vx = 0; v.vy = 0; v.landed = true;
+                    }
+                }
+            }
+        }
+
+        // 任意一艘船的碰撞检测（和主船同一套逻辑，只是换了对象）
+        function lowestCollisionPointFor(v, angleDeg) {
+            let best = null, bestD = Infinity;
+            for (const p of v.spec.corners) {
+                const a = (angleDeg - 90) * Math.PI / 180;
+                const rx = p.x - v.spec.com.x, ry = p.y - v.spec.com.y;
+                const wx = v.x + rx * Math.cos(a) - ry * Math.sin(a);
+                const wy = v.y + rx * Math.sin(a) + ry * Math.cos(a);
+                const dx = wx - planet.x, dy = wy - planet.y;
+                const d = Math.sqrt(dx * dx + dy * dy);
+                if (d < bestD) { bestD = d; best = { local: p, world: { x: wx, y: wy }, dist: d }; }
+            }
+            return best;
         }
 
         // 还有多少个部件活着
@@ -1482,6 +1729,8 @@
                     rocket.vy *= damp;
                     // 没发动机了就彻底飞不起来
                     if (!hasWorkingEngine() && rocket.state === 'firing') rocket.state = 'idle';
+                    // 炸断了吗？
+                    if (blew > 0) checkSeparation();
                 }
 
                 // 摔得狠、而且发动机没在推 → 弹一下，把大部分能量吃掉。
@@ -1529,6 +1778,9 @@
             // 质心随燃料变化：油烧掉，重心会往船头偏（真实火箭也是这样）。
             // 每帧重算一次（部件不多，开销可以忽略）。
             SPEC.com = shipCenterOfMass(shipDef, SPEC, rocket.fuel);
+
+            // 失控的航天器（惯性飞行，不能操控）
+            updateDerelicts(dt);
 
             // 再入加热 + 碎片 + 撞击冷却
             updateHeat(dt);
@@ -1834,6 +2086,27 @@
                 ctx.restore();
             }
 
+            // ---- 失控的航天器（残骸）：画成暗色的部件块 ----
+            for (const v of vessels) {
+                if (v.id === activeVesselId) continue;
+                ctx.save();
+                ctx.translate(v.x, v.y);
+                ctx.rotate((v.angle - 90) * Math.PI / 180);
+                ctx.translate(-v.spec.com.x, -v.spec.com.y);
+                ctx.globalAlpha = 0.85;
+                for (const p of v.def.parts) {
+                    if (v.destroyed.has(p.id)) continue;
+                    const t = PART_TYPES[p.type];
+                    if (!t) continue;
+                    const P = PART_PX;
+                    const x = p.x * P - v.spec.centerX * P;
+                    const y = v.spec.box.maxY * P - (p.y + t.h) * P;
+                    drawShipPart(ctx, p.type, t, x, y, t.w * P, t.h * P);
+                }
+                ctx.globalAlpha = 1;
+                ctx.restore();
+            }
+
             // 爆炸碎片（画在飞船下面，看起来像从船体飞出来的）
             for (const d of debris) {
                 const alpha = Math.max(0, Math.min(1, d.life / 0.8));
@@ -2022,6 +2295,24 @@
 
         // 开局：把飞船稳稳放在星球表面（按碰撞箱算，船形怎么变都对）
         placeOnSurface();
+        // 把玩家这艘登记进航天器列表
+        (function registerMainVessel() {
+            const v = {
+                id: 'v0',
+                def: shipDef,
+                spec: SPEC,
+                x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy,
+                angle: rocket.angle,
+                fuel: rocket.fuel,
+                state: rocket.state,
+                landed: rocket.landed,
+                destroyed: destroyed,
+                get isMain() { return true; },
+            };
+            activeVesselId = 'v0';
+            vessels.push(v);
+            vesselSeq = 1;
+        })();
         setInterval(pollControl, CTRL_INTERVAL_MS);
 
         // 如果服务器上有造船厂存的飞船，就用它（手机造的船电脑也能飞）
