@@ -517,7 +517,13 @@
                        body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9' },
             tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
                        body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800' },
-            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 4000,
+            // 推力 200（配合物理尺度 1px=50m、质量 115）
+            // 起飞余量 88 倍 —— 看着夸张，但这是因为**引力本身很弱**（0.98 m/s²）。
+            // 真实火箭余量只有 1.4 倍，但那是几分钟的缓慢爬升；
+            // 游戏里评价标准应该是「多久到轨道」：
+            //   推力 200 -> 冲出 50 km 大气约 34 秒，10 秒升 4.3 km
+            // 之前配成 4000 时 12 秒就到 21 km/s，直接飞出太阳系了。
+            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 200,
                        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
         };
         const PART_PX = 7;           // 游戏里一格画多少像素（调小 = 飞船看着更小；建造页是 20）
@@ -544,7 +550,18 @@
         const ATMO_TOP_M = ATMO_TOP_KM * 1000;
 
         // 当前每像素代表多少米（随缩放实时变）
+        // 物理尺度：**固定不变**，和相机缩放无关。
+        // 物理永远在「1 px = 50 m」这个尺度下跑，
+        // 所以无论你怎么缩放，飞船的速度、轨道、下落都完全一样。
+        const PHYS_M_PER_PX = PLANET_RADIUS_M / 20000;   // = 50 m/px，恒定
+
+        // 显示尺度：只影响「看起来多大」和 HUD 上的数字，
+        // **绝对不参与任何物理计算**。
         function metersPerPixel() {
+            return PHYS_M_PER_PX;
+        }
+        // 屏幕上一个像素代表多少米（随缩放变，只用于渲染）
+        function displayMetersPerPixel() {
             return GROUND_M_PER_PX / Math.max(1e-9, camera.zoom);
         }
 
@@ -562,10 +579,10 @@
             if (Math.abs(m) >= 1) return m.toFixed(m >= 100 ? 0 : 1) + ' m';
             return (m * 100).toFixed(0) + ' cm';
         }
-        // 像素/秒 → 速度文字。速度用「真实米制」：
-        // 物理里的像素速度 x metersPerPixel() = 真实米/秒
+        // 像素/秒 → 速度文字。用**固定**的物理尺度换算，
+        // 所以缩放视角时速度数字不会跟着乱变。
         function fmtSpeed(pxPerSec) {
-            const ms = pxPerSec * metersPerPixel();
+            const ms = pxPerSec * PHYS_M_PER_PX;
             if (Math.abs(ms) >= 1000) return (ms / 1000).toFixed(2) + ' km/s';
             return ms.toFixed(ms >= 100 ? 0 : 1) + ' m/s';
         }
@@ -1978,7 +1995,8 @@
             const dy = planet.y - y;
             const dist = Math.sqrt(dx*dx + dy*dy) || 1;
             const safe = Math.max(dist, planet.radius * 0.5);   // 防止贴到球心时引力爆表
-            const g0px = SURFACE_GRAVITY_MS2 / metersPerPixel();   // 米制 -> 像素制
+            // 用**固定**的物理尺度换算，绝不用相机缩放
+            const g0px = SURFACE_GRAVITY_MS2 / PHYS_M_PER_PX;   // 米制 -> 像素制（恒定）
             const a = g0px * (planet.radius / safe) ** 2;
             return { ax: (dx / dist) * a, ay: (dy / dist) * a, dist };
         }
