@@ -669,6 +669,9 @@
             { id: 'first_flight',  name: '首飞',       desc: '第一次点火离开星球表面' },
             { id: 'soft_landing',  name: '稳如老猫',   desc: '着陆时垂直速度低于 20 px/s' },
             { id: 'hard_landing',  name: '硬着陆',     desc: '以超过 250 px/s 的速度砸在星球上还活着' },
+            { id: 'true_hard_landing', name: '真·硬着陆', desc: '着陆时把至少一个部件撞炸了' },
+            { id: 'survive_wreck',     name: '残骸归来',   desc: '撞掉一半以上部件，还成功着陆' },
+            { id: 'no_scratch',        name: '毫发无伤',   desc: '一次着陆，垂直速度低于 5 px/s' },
             { id: 'refuel_full',   name: '补给完毕',   desc: '在地面上把燃料加满' },
             { id: 'dump_half',     name: '减负',       desc: '在地面上卸掉一半以上的燃料' },
             { id: 'save_game',     name: '存档习惯',   desc: '用 S 存一次档' },
@@ -830,6 +833,114 @@
 
         // 着陆参数
         const LANDING_SPEED = 180;    // 扎向地面的速度小于它就稳稳着陆，大于它就弹一下
+
+        // ==================== 撞击损毁 ====================
+        // 撞得太狠，部件会被震坏、炸掉，同时吃掉一部分速度。
+        // 每个部件的耐久不同：燃料箱厚实，控制舱脆一些。
+        const DAMAGE_SPEED = 120;     // 超过这个撞击速度才开始受损
+        const DESTROY_SPEED = 420;    // 超过这个速度，撞在哪儿哪儿直接炸
+        const PART_HP = { capsule: 70, tank: 110, engine: 90 };
+
+        let wreckedCount = 0;         // 这一趟撞炸了几个部件
+        let debris = [];              // 爆炸碎片（纯视觉）
+
+        // 给每个部件建一份耐久表（和 shipDef.parts 一一对应）
+        function initPartHP() {
+            const hp = {};
+            for (const p of shipDef.parts) hp[p.id] = PART_HP[p.type] || 80;
+            return hp;
+        }
+        let partHP = initPartHP();
+        let destroyed = new Set();    // 已经炸掉的部件 id
+
+        // 撞了一下：按撞击速度给所有部件掉耐久，太狠的直接炸。
+        // 用「单次撞击配额」避免连续弹跳把伤害累积起来 ——
+        // 不然轻轻颠两下就把整艘船震碎了。
+        let impactCooldown = 0;
+        let impactBudget = {};       // 本次着陆每个部件最多掉多少血
+
+        function resetImpactBudget() {
+            impactBudget = {};
+            for (const p of shipDef.parts) impactBudget[p.id] = 0;
+        }
+        resetImpactBudget();
+
+        function applyImpact(speed) {
+            if (speed < DAMAGE_SPEED) return 0;
+            if (impactCooldown > 0) return 0;          // 刚撞过，这次不算
+            impactCooldown = 0.35;                     // 0.35 秒内的连续碰撞只算一次
+
+            // 撞击越狠伤害越大：低于 DAMAGE_SPEED 无伤，之后线性增长
+            const over = speed - DAMAGE_SPEED;
+            const dmg = over * 0.55;
+
+            let blew = 0;
+            for (const p of shipDef.parts) {
+                if (destroyed.has(p.id)) continue;
+                // 每个部件在本次着陆里的总伤害有上限，防止叠死
+                const room = Math.max(0, (PART_HP[p.type] || 80) * 1.6 - (impactBudget[p.id] || 0));
+                const real = Math.min(dmg * (0.6 + Math.random() * 0.8), room);
+                impactBudget[p.id] = (impactBudget[p.id] || 0) + real;
+                partHP[p.id] -= real;
+                // 只有一次撞得特别狠（超过 DESTROY_SPEED）才当场炸
+                if (speed > DESTROY_SPEED || partHP[p.id] <= 0) {
+                    destroyed.add(p.id);
+                    blowUpPart(p);
+                    blew++;
+                }
+            }
+            if (blew > 0) wreckedCount += blew;
+            return blew;
+        }
+
+        // 爆炸：生成碎片
+        function blowUpPart(p) {
+            const t = PART_TYPES[p.type];
+            if (!t) return;
+            const P = PART_PX;
+            const cx = (p.x + t.w / 2 - SPEC.centerX) * P;
+            const cy = (SPEC.box.maxY - (p.y + t.h / 2)) * P;
+            const world = shipPointWorld(cx, cy, rocket.angle);
+            for (let i = 0; i < 14; i++) {
+                const ang = Math.random() * Math.PI * 2;
+                const sp = 40 + Math.random() * 160;
+                debris.push({
+                    x: world.x, y: world.y,
+                    vx: rocket.vx + Math.cos(ang) * sp,
+                    vy: rocket.vy + Math.sin(ang) * sp,
+                    life: 1.6 + Math.random() * 1.4,
+                    size: 1.5 + Math.random() * 2.5,
+                    color: t.body,
+                });
+            }
+        }
+
+        // 碎片淡出
+        function updateDebris(dt) {
+            for (let i = debris.length - 1; i >= 0; i--) {
+                const d = debris[i];
+                d.life -= dt;
+                if (d.life <= 0) { debris.splice(i, 1); continue; }
+                d.x += d.vx * dt;
+                d.y += d.vy * dt;
+                const g = gravityAt(d.x, d.y);
+                d.vx += g.ax * dt;
+                d.vy += g.ay * dt;
+            }
+            if (debris.length > 400) debris.splice(0, debris.length - 400);
+        }
+
+        // 还有多少个部件活着
+        function alivePartCount() {
+            return shipDef.parts.filter(p => !destroyed.has(p.id)).length;
+        }
+        // 还有发动机吗（没了就飞不动了）
+        function hasWorkingEngine() {
+            return shipDef.parts.some(p => p.type === 'engine' && !destroyed.has(p.id));
+        }
+        function hasWorkingCapsule() {
+            return shipDef.parts.some(p => p.type === 'capsule' && !destroyed.has(p.id));
+        }
         const GROUND_FRICTION = 0.85; // 贴地摩擦：停在地上时横向速度每帧乘这个数
 
         // 日志计时器
@@ -973,6 +1084,7 @@
                     stats.launchX = rocket.x; // 记下起飞点，着陆时用来算飞了多远
                     stats.launchY = rocket.y;
                     stats.escaped = false;    // “迷路的猫”只算同一次飞行：逃逸了又自己回来
+                    resetImpactBudget();      // 新的一趟，重新计算能承受的撞击
                 }
                 rocket.state = 'firing';      // 点火；停在星球上按就是重新起飞
                 rocket.landed = false;
@@ -1160,6 +1272,26 @@
                 // 结结实实砸了一下 —— 不管接下来是弹起来还是停住，都算数
                 if (intoGround > 250) unlock('hard_landing');
 
+                // ---- 撞击损毁：撞太狠就震坏 / 炸掉部件，并吃掉一部分速度 ----
+                if (intoGround > DAMAGE_SPEED) {
+                    const blew = applyImpact(intoGround);
+                    if (blew > 0) {
+                        unlock('true_hard_landing');
+                        toastQueue.push({
+                            title: '撞 击 警 报',
+                            name: blew + ' 个部件被撞毁',
+                            desc: '还有 ' + alivePartCount() + ' / ' + shipDef.parts.length + ' 个部件完好',
+                        });
+                    }
+                    // 撞击消耗能量：残骸越破，速度掉得越多
+                    const wreckRatio = 1 - alivePartCount() / Math.max(1, shipDef.parts.length);
+                    const damp = Math.max(0.25, 0.75 - wreckRatio * 0.5);
+                    rocket.vx *= damp;
+                    rocket.vy *= damp;
+                    // 没发动机了就彻底飞不起来
+                    if (!hasWorkingEngine() && rocket.state === 'firing') rocket.state = 'idle';
+                }
+
                 // 摔得狠、而且发动机没在推 → 弹一下，把大部分能量吃掉。
                 // 但如果你正点火往地里顶，就直接停住 —— 不然会一直弹个没完，永远落不下来。
                 if (intoGround > LANDING_SPEED && rocket.state !== 'firing') {
@@ -1184,6 +1316,8 @@
 
                         // ---- 着陆相关的成就 ----
                         if (intoGround < 20) unlock('soft_landing');    // 轻轻落下
+                        if (intoGround < 5) unlock('no_scratch');       // 毫发无伤
+                        if (alivePartCount() < shipDef.parts.length / 2) unlock('survive_wreck');  // 残骸归来
                         if (rocket.fuel < 0.05) unlock('low_fuel_land');// 快没油了还能落回来
                         if (stats.escaped) unlock('homing_cat');        // 飞出去又自己回来了
                         if (Math.hypot(rocket.x - stats.launchX, rocket.y - stats.launchY) > 3000) {
@@ -1203,6 +1337,10 @@
             // 质心随燃料变化：油烧掉，重心会往船头偏（真实火箭也是这样）。
             // 每帧重算一次（部件不多，开销可以忽略）。
             SPEC.com = shipCenterOfMass(shipDef, SPEC, rocket.fuel);
+
+            // 碎片 + 撞击冷却
+            updateDebris(dt);
+            if (impactCooldown > 0) impactCooldown -= dt;
 
             // 成就检查 + 弹出横幅
             checkAchievements(dt);
@@ -1272,6 +1410,7 @@
             for (const p of shipDef.parts) {
                 const t = PART_TYPES[p.type];
                 if (!t) continue;
+                if (destroyed.has(p.id)) continue;   // 炸掉的部件不再画出来
                 // 网格坐标（左下角，y 向上）→ 本地像素（左上角，y 向下）
                 const x = p.x * P - midX;
                 const y = bottomLocal - (p.y + t.h) * P;
@@ -1282,7 +1421,7 @@
 
             // 点火时在发动机喷口画火焰
             if (engineOn) {
-                const engines = shipDef.parts.filter(p => p.type === 'engine');
+                const engines = shipDef.parts.filter(p => p.type === 'engine' && !destroyed.has(p.id));
                 const flick = 0.75 + Math.random() * 0.45;
                 for (const p of engines) {
                     const cx = (p.x + PART_TYPES.engine.w / 2) * P - midX;
@@ -1486,6 +1625,22 @@
                 ctx.stroke();
                 ctx.restore();
             }
+
+            // 爆炸碎片（画在飞船下面，看起来像从船体飞出来的）
+            for (const d of debris) {
+                const alpha = Math.max(0, Math.min(1, d.life / 0.8));
+                ctx.globalAlpha = alpha * 0.5;
+                ctx.fillStyle = '#ffaa33';
+                ctx.beginPath();
+                ctx.arc(d.x, d.y, d.size * 2.0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = d.color;
+                ctx.beginPath();
+                ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
 
             // 飞船：按你在造船厂拼的部件逐块画出来
             // 旋转中心 = 质心（和物理判定用的是同一个中心，不会出现"转起来错位"）
