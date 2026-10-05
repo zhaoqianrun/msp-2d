@@ -464,8 +464,8 @@
         // 所以贴着地面时的引力就是 surfaceGravity —— 想让星球变重只改这个数。
         const planet = {
             x: 500, y: 350,
-            radius: 4000,          // 半径（像素）—— 星球更大，地平线更平，像一颗真正的行星
-            surfaceGravity: 420    // 贴着地面时的引力（px/s²）—— 数字越大星球越"重"，越难起飞
+            radius: 9000,          // 半径（像素）—— 星球更大，地平线更平，像一颗真正的行星
+            surfaceGravity: 950    // 贴着地面时的引力（px/s²）—— 数字越大星球越"重"，越难起飞
         };
         const rocket = {
             x: planet.x, y: planet.y - (planet.radius + 8), vx: 0, vy: 0,   // 一开始就停在星球表面（跟着半径自动算，改星球大小不用再改这里）
@@ -505,7 +505,7 @@
                        body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9' },
             tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
                        body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800' },
-            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 80000,
+            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 180000,
                        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
         };
         const PART_PX = 7;           // 游戏里一格画多少像素（调小 = 飞船看着更小；建造页是 20）
@@ -1071,8 +1071,17 @@
         // 厚度占半径的 60%。现实里大气只有半径的 1.5%，
         // 但本星球半径只有 200 m，按真实比例算出来只有 3 m 厚，
         // 屏幕上根本看不见，也没有「冲出大气」的感觉。
-        const ATMO_RATIO = 0.60;            // 大气厚度占星球半径的比例
-        const DRAG_COEF = 0.000010;         // 阻力系数（调大 = 空气更稠、掉得更快）
+        const ATMO_RATIO = 0.85;            // 大气厚度占星球半径的比例（调大 = 大气更厚）
+        // 阻力系数。drag = 系数 x 密度 x 速度²
+        // 试过两轮：
+        //   0.0004  太猛 —— 起飞速度刚上来就被拖住，飞不出大气
+        //   0.00012 还是太强 —— 从 191 m 自由落体，落地只剩 0.3 m/s，
+        //           等于大气变成了缓冲垫，完全没有坠毁风险
+        // 取 0.00006：
+        //   600 px/s  → 22 px/s²（不影响起飞）
+        //  1500 px/s  → 135 px/s²（能感觉到拖拽）
+        //  3000 px/s  → 540 px/s²（再入时明显减速，但不会免死）
+        const DRAG_COEF = 0.00006;
         const REENTRY_SPEED = 120;          // 超过这个速度冲进大气就开始发光
 
         function atmoThickness() { return planet.radius * ATMO_RATIO; }
@@ -1955,7 +1964,11 @@
             if (dens > 0) {
                 const sp = Math.hypot(rocket.vx, rocket.vy);
                 if (sp > 1) {
-                    const drag = DRAG_COEF * dens * sp * sp;
+                    // 发动机开着往上冲时，阻力打三折 ——
+                    // 这是游戏性考虑：玩家明确想上升，被大气拖住会非常难受。
+                    // 关机后（自由落体/再入）阻力恢复全额，减速伞效果保留。
+                    const pushing = rocket.state === 'firing' && rocket.throttle > 0.05;
+                    const drag = DRAG_COEF * dens * sp * sp * (pushing ? 0.3 : 1);
                     rocket.vx -= (rocket.vx / sp) * drag * dt;
                     rocket.vy -= (rocket.vy / sp) * drag * dt;
                 }
