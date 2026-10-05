@@ -19,7 +19,8 @@
             position: absolute; top: 10px; left: 10px; z-index: 3; color: #0f0;
             font-family: monospace; font-size: 14px; pointer-events: none;
             text-shadow: 1px 1px 2px #000; white-space: pre;
-        }
+            max-width: calc(100vw - 740px);   /* 右边给按钮条留位置 */
+            overflow: hidden;
         /* 顶部中间：本航天器的部件清单 */
         /* 时间加速按钮：并进右上角的按钮条，不单独定位 */
         #time-btn {
@@ -46,15 +47,29 @@
         #time-btn #time-value.ultra { color: #ff6a6a; border-color: #7a2828;
                                       animation: pulse 0.9s ease-in-out infinite; }
 
+        /* 顶部部件栏。
+           之前放在第一行中间，宽屏时会一直伸到右边，
+           把右上角的时间按钮和存档按钮盖住（试过限宽，但按钮条本身
+           就占 700+ px，怎么限都会重叠）。
+           现在**挪到第二行**，横跨整个宽度：
+             第一行 = HUD 文字（左） + 功能按钮条（右）
+             第二行 = 部件清单
+           两行之间不会再抢位置。 */
         #parts-bar {
-            position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+            position: absolute; top: 50px; left: 10px; right: 10px;
             z-index: 3; pointer-events: none; white-space: nowrap;
             display: flex; align-items: center; gap: 6px;
             font-family: monospace; font-size: 12px;
             background: rgba(4, 10, 18, 0.72);
             border: 1px solid #1e3050; border-radius: 8px;
-            padding: 6px 10px;
-            max-width: calc(100vw - 20px); overflow: hidden;
+            padding: 5px 10px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        #parts-bar::-webkit-scrollbar { display: none; }
+        /* 窄屏：HUD 文字会换行，部件栏跟着往下推 */
+        @media (max-width: 1100px) {
+            #parts-bar { top: 46px; }
         }
         #parts-bar .p {
             display: inline-flex; align-items: center; gap: 4px;
