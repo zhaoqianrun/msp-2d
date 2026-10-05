@@ -673,6 +673,9 @@
             { id: 'true_hard_landing', name: '真·硬着陆', desc: '着陆时把至少一个部件撞炸了' },
             { id: 'survive_wreck',     name: '残骸归来',   desc: '撞掉一半以上部件，还成功着陆' },
             { id: 'no_scratch',        name: '毫发无伤',   desc: '一次着陆，垂直速度低于 5 px/s' },
+            { id: 'burned_up',         name: '火烧眉毛',   desc: '再入时部件被高温烧毁' },
+            { id: 'capsule_survives',  name: '返回舱幸存', desc: '其它部件全烧光，控制舱还挺着' },
+            { id: 'meteor',            name: '流星',       desc: '以超过 400 px/s 冲进大气层' },
             { id: 'refuel_full',   name: '补给完毕',   desc: '在地面上把燃料加满' },
             { id: 'dump_half',     name: '减负',       desc: '在地面上卸掉一半以上的燃料' },
             { id: 'save_game',     name: '存档习惯',   desc: '用 S 存一次档' },
@@ -842,6 +845,114 @@
         const DESTROY_SPEED = 420;    // 超过这个速度，撞在哪儿哪儿直接炸
         const PART_HP = { capsule: 70, tank: 110, engine: 90 };
 
+        // ==================== 再入热损毁 ====================
+        // 高速冲进大气时，**迎着气流的那一面**会升温。
+        // 哪个部件在前面晒着，哪个就先烧起来；温度到阈值就炸。
+        // 控制舱（返回舱）有隔热盾，阈值高得多 —— 它就是干这个的。
+        const HEAT_LIMIT = {
+            capsule: 900,    // 控制舱：带隔热盾，最耐烧
+            tank:    260,    // 燃料箱：薄壳，最先烧穿
+            engine:  420,    // 发动机：金属，中等
+        };
+        const HEAT_COOL_RATE = 220;      // 每秒散热多少度（不在大气里时）
+        const AMBIENT_TEMP = 20;         // 环境温度
+
+        // 每个部件的当前温度
+        let partTemp = {};
+        let heatWrecked = 0;             // 这一趟烧毁了几个
+
+        function initPartTemp() {
+            const t = {};
+            for (const p of shipDef.parts) t[p.id] = AMBIENT_TEMP;
+            return t;
+        }
+        partTemp = initPartTemp();
+
+        // 冲击加热：算每个部件"迎着气流"的程度（0~1）
+        // 迎风面 = 部件中心相对飞船质心、在速度反方向上的投影
+        function partWindExposure(p) {
+            const t = PART_TYPES[p.type];
+            if (!t) return 0;
+            const P = PART_PX;
+            // 部件中心（本地像素，已相对质心）
+            const cx = (p.x + t.w / 2 - SPEC.centerX) * P - SPEC.com.x;
+            const cy = (SPEC.box.maxY - (p.y + t.h / 2)) * P - SPEC.com.y;
+            // 转到世界方向
+            const a = (rocket.angle - 90) * Math.PI / 180;
+            const wx = cx * Math.cos(a) - cy * Math.sin(a);
+            const wy = cx * Math.sin(a) + cy * Math.cos(a);
+            // 速度方向（气流从哪来）
+            const sp = Math.hypot(rocket.vx, rocket.vy);
+            if (sp < 1) return 0;
+            const ux = rocket.vx / sp, uy = rocket.vy / sp;
+            // 迎风程度：部件越靠前（在速度方向上），受热越多
+            const proj = (wx * ux + wy * uy);
+            const half = Math.max(SPEC.width, SPEC.height) / 2 || 1;
+            return Math.max(0, Math.min(1, 0.5 + proj / (half * 2)));
+        }
+
+        // 每帧更新温度
+        function updateHeat(dt) {
+            const dens = atmosphereDensity(rocket.x, rocket.y);
+            const sp = Math.hypot(rocket.vx, rocket.vy);
+            const hot = dens > 0.01 && sp > REENTRY_SPEED;
+            if (dens > 0.05 && sp > 400) unlock('meteor');   // 流星：高速冲进大气
+            let blew = 0;
+
+            for (const p of shipDef.parts) {
+                if (destroyed.has(p.id)) continue;
+                if (hot) {
+                    // 加热：速度、密度、迎风面三者相乘
+                    const expo = partWindExposure(p);
+                    const over = sp - REENTRY_SPEED;
+                    // 系数调过：本星球大气只有 120m 厚，穿过它只要两三秒，
+                    // 所以加热必须够猛，再入才真的能把部件烧穿。
+                    const rate = over * over * 0.0016 * dens * (0.25 + expo * 1.6);
+                    partTemp[p.id] += rate * dt;
+                } else {
+                    // 散热
+                    const d = partTemp[p.id] - AMBIENT_TEMP;
+                    if (d > 0) partTemp[p.id] -= Math.min(d, HEAT_COOL_RATE * dt);
+                }
+                // 到阈值就炸
+                const limit = HEAT_LIMIT[p.type] || 800;
+                if (partTemp[p.id] >= limit) {
+                    destroyed.add(p.id);
+                    blowUpPart(p);
+                    blew++;
+                }
+            }
+            if (blew > 0) {
+                heatWrecked += blew;
+                unlock('burned_up');
+                // 其它都烧光了，只剩控制舱
+                const others = shipDef.parts.filter(p => p.type !== 'capsule');
+                if (others.length > 0 &&
+                    others.every(p => destroyed.has(p.id)) &&
+                    hasWorkingCapsule()) {
+                    unlock('capsule_survives');
+                }
+                toastQueue.push({
+                    title: '再 入 警 报',
+                    name: blew + ' 个部件因高温解体',
+                    desc: '还有 ' + alivePartCount() + ' / ' + shipDef.parts.length + ' 个部件完好',
+                });
+            }
+            return blew;
+        }
+
+        // 最热的那个部件（用于 HUD 显示）
+        function hottestPart() {
+            let best = null, bestT = -1;
+            for (const p of shipDef.parts) {
+                if (destroyed.has(p.id)) continue;
+                const t = partTemp[p.id] || 0;
+                if (t > bestT) { bestT = t; best = p; }
+            }
+            if (!best) return null;
+            return { part: best, temp: bestT, limit: HEAT_LIMIT[best.type] || 800 };
+        }
+
         // ==================== 大气层 ====================
         // 星球外面包一层大气：有阻力、有再入发光。
         // 厚度按半径的 15% 算（现实里只有 1.5%，但那样在屏幕上根本看不见）。
@@ -879,6 +990,15 @@
         function myAtmosphere() {
             return atmosphereDensity(rocket.x, rocket.y);
         }
+        // HUD 上那行再入温度提示
+        function heatLine() {
+            const h = hottestPart();
+            if (!h || h.temp < AMBIENT_TEMP + 30) return '';
+            const pct = Math.round(h.temp / h.limit * 100);
+            const t = PART_TYPES[h.part.type];
+            return `  🔥 ${t ? t.name : '部件'} ${Math.round(h.temp)}°C / ${h.limit}°C（${pct}%）`;
+        }
+
         // 是否已经飞出大气
         function inSpace() {
             const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
@@ -1410,7 +1530,8 @@
             // 每帧重算一次（部件不多，开销可以忽略）。
             SPEC.com = shipCenterOfMass(shipDef, SPEC, rocket.fuel);
 
-            // 碎片 + 撞击冷却
+            // 再入加热 + 碎片 + 撞击冷却
+            updateHeat(dt);
             updateDebris(dt);
             if (impactCooldown > 0) impactCooldown -= dt;
 
@@ -1856,7 +1977,7 @@
 
             hud.innerText =
                 `速度: ${fmtSpeed(speedNum)} | 状态: ${statusText} | 角度: ${Math.round(rocket.angle)}° | 缩放: ${camera.zoom.toFixed(2)}x\n` +
-                `高度: ${fmtDistance(surfaceDist)} | ${atmoStatusText()}${(rocket.heat || 0) > 0.05 ? '  🔥 再入加热中' : ''}\n` +
+                `高度: ${fmtDistance(surfaceDist)} | ${atmoStatusText()}${heatLine()}\n` +
                 orbitLine + '\n' +
                 `圆轨道速度: ${fmtSpeed(vCirc)} | 逃逸速度: ${fmtSpeed(vEsc)}` + orbitHint + '\n' +
                 `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m | 质量: ${shipMass(rocket.fuel).toFixed(0)} 单位` + '\n' +
