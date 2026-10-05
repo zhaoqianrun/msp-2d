@@ -929,84 +929,77 @@
 
         // 冲击加热：算每个部件"迎着气流"的程度（0~1）
         // 迎风面 = 部件中心相对飞船质心、在速度反方向上的投影
-        function partWindExposure(p) {
+        // 迎风程度：部件在速度方向上越靠前，受热越多（同样支持任意船体）
+        function partWindExposure(p, v) {
+            v = v || mainView;
             const t = PART_TYPES[p.type];
             if (!t) return 0;
             const P = PART_PX;
-            // 部件中心（本地像素，已相对质心）
-            const cx = (p.x + t.w / 2 - SPEC.centerX) * P - SPEC.com.x;
-            const cy = (SPEC.box.maxY - (p.y + t.h / 2)) * P - SPEC.com.y;
-            // 转到世界方向
-            const a = (rocket.angle - 90) * Math.PI / 180;
+            const spec = v.spec;
+            const cx = (p.x + t.w / 2 - spec.centerX) * P - spec.com.x;
+            const cy = (spec.box.maxY - (p.y + t.h / 2)) * P - spec.com.y;
+            const a = (v.angle - 90) * Math.PI / 180;
             const wx = cx * Math.cos(a) - cy * Math.sin(a);
             const wy = cx * Math.sin(a) + cy * Math.cos(a);
-            // 速度方向（气流从哪来）
-            const sp = Math.hypot(rocket.vx, rocket.vy);
+            const sp = Math.hypot(v.vx, v.vy);
             if (sp < 1) return 0;
-            const ux = rocket.vx / sp, uy = rocket.vy / sp;
-            // 迎风程度：部件越靠前（在速度方向上），受热越多
+            const ux = v.vx / sp, uy = v.vy / sp;
             const proj = (wx * ux + wy * uy);
-            const half = Math.max(SPEC.width, SPEC.height) / 2 || 1;
+            const half = Math.max(spec.width, spec.height) / 2 || 1;
             return Math.max(0, Math.min(1, 0.5 + proj / (half * 2)));
         }
 
         // 每帧更新温度
-        function updateHeat(dt) {
-            const dens = atmosphereDensity(rocket.x, rocket.y);
-            const sp = Math.hypot(rocket.vx, rocket.vy);
+        // 再入加热：对任意船体都适用
+        function updateHeat(dt, v) {
+            v = v || mainView;
+            const dens = atmosphereDensity(v.x, v.y);
+            const sp = Math.hypot(v.vx, v.vy);
 
-            // 关键：必须「朝地面冲」才算再入加热。
-            // 只看速度的话，垂直起飞加速到几百 px/s 也会被当成再入，
-            // 结果刚离地就把燃料箱烧穿了（这是个真 bug）。
-            const rx = rocket.x - planet.x, ry = rocket.y - planet.y;
+            // 必须「朝地面冲」才算再入加热 —— 否则垂直起飞也会被当成再入
+            const rx = v.x - planet.x, ry = v.y - planet.y;
             const r = Math.hypot(rx, ry) || 1;
-            const radialSpeed = (rocket.vx * rx + rocket.vy * ry) / r;   // >0 = 远离星球
-            const divingIn = radialSpeed < -20;                          // 正在往下扎
+            const radialSpeed = (v.vx * rx + v.vy * ry) / r;
+            const divingIn = radialSpeed < -20;
 
             const hot = dens > 0.01 && sp > REENTRY_SPEED && divingIn;
-            if (dens > 0.05 && sp > 400 && divingIn) unlock('meteor');
+            if (v.isMain && dens > 0.05 && sp > 400 && divingIn) unlock('meteor');
             let blew = 0;
 
-            for (const p of shipDef.parts) {
-                if (destroyed.has(p.id)) continue;
+            for (const p of v.def.parts) {
+                if (v.dead.has(p.id)) continue;
                 if (hot) {
-                    // 加热：速度、密度、迎风面三者相乘
-                    const expo = partWindExposure(p);
+                    const expo = partWindExposure(p, v);
                     const over = sp - REENTRY_SPEED;
-                    // 系数调过：本星球大气只有 120m 厚，穿过它只要两三秒，
-                    // 所以加热必须够猛，再入才真的能把部件烧穿。
                     const rate = over * over * 0.0016 * dens * (0.25 + expo * 1.6);
-                    // 迎风面吃得最多，背风面只吃到零头 —— 不再有随机数，结果可预期
-                    partTemp[p.id] += rate * dt;
+                    v.temp[p.id] += rate * dt;
                 } else {
-                    // 散热
-                    const d = partTemp[p.id] - AMBIENT_TEMP;
-                    if (d > 0) partTemp[p.id] -= Math.min(d, HEAT_COOL_RATE * dt);
+                    const d = v.temp[p.id] - AMBIENT_TEMP;
+                    if (d > 0) v.temp[p.id] -= Math.min(d, HEAT_COOL_RATE * dt);
                 }
-                // 到阈值就炸
                 const limit = HEAT_LIMIT[p.type] || 800;
-                if (partTemp[p.id] >= limit) {
-                    destroyed.add(p.id);
-                    blowUpPart(p);
+                if (v.temp[p.id] >= limit) {
+                    v.dead.add(p.id);
+                    blowUpPart(p, v);
                     invalidateShipCache();
                     blew++;
                 }
             }
-            if (blew > 0) {
+            // 主船才有成就和提示，残骸静默烧毁
+            if (blew > 0 && v.isMain) {
                 heatWrecked += blew;
                 unlock('burned_up');
                 checkSeparation();
-                // 其它都烧光了，只剩控制舱
-                const others = shipDef.parts.filter(p => p.type !== 'capsule');
+                const others = v.def.parts.filter(p => p.type !== 'capsule');
                 if (others.length > 0 &&
-                    others.every(p => destroyed.has(p.id)) &&
+                    others.every(p => v.dead.has(p.id)) &&
                     hasWorkingCapsule()) {
                     unlock('capsule_survives');
                 }
                 toastQueue.push({
                     title: '再 入 警 报',
                     name: blew + ' 个部件因高温解体',
-                    desc: '还有 ' + alivePartCount() + ' / ' + shipDef.parts.length + ' 个部件完好',
+                    desc: '还有 ' + alivePartCount() + ' / ' + v.def.parts.length + ' 个部件完好',
                 });
             }
             return blew;
@@ -1076,6 +1069,50 @@
             return (r - planet.radius) >= atmoThickness();
         }
 
+        // ==================== 统一航天器抽象 ====================
+        // 问题是「飞船有两套物理」：玩家船走完整流程（损伤/加热/分离），
+        // 残骸只走引力+阻力+撞地反弹。任何改动只改一边就出不一致。
+        //
+        // 这层把两者统一成同一个接口，物理只认这个接口：
+        //   v.x v.y v.vx v.vy v.angle v.fuel v.landed v.state v.throttle
+        //   v.def   ← 部件列表     v.spec  ← 质量/质心/碰撞箱
+        //   v.hp    ← 部件耐久     v.temp  ← 部件温度
+        //   v.dead  ← 已毁部件集合
+        //
+        // 玩家船的「主视图」直接指向 rocket / shipDef / SPEC / partHP
+        // 这些老变量，所以老的 147 处 rocket.xxx 一行都不用改。
+        function mainVesselView() {
+            return mainView;
+        }
+        let mainView = null;   // 在初始化时建立
+
+        // 建立「玩家船」的统一视图（字段和残骸一一对应）
+        function bindMainView() {
+            mainView = {
+                id: 'v0',
+                isMain: true,
+                get x() { return rocket.x; }, set x(v) { rocket.x = v; },
+                get y() { return rocket.y; }, set y(v) { rocket.y = v; },
+                get vx() { return rocket.vx; }, set vx(v) { rocket.vx = v; },
+                get vy() { return rocket.vy; }, set vy(v) { rocket.vy = v; },
+                get angle() { return rocket.angle; }, set angle(v) { rocket.angle = v; },
+                get fuel() { return rocket.fuel; }, set fuel(v) { rocket.fuel = v; },
+                get state() { return rocket.state; }, set state(v) { rocket.state = v; },
+                get throttle() { return rocket.throttle; }, set throttle(v) { rocket.throttle = v; },
+                get landed() { return rocket.landed; }, set landed(v) { rocket.landed = v; },
+                get heat() { return rocket.heat; }, set heat(v) { rocket.heat = v; },
+                // 这些直接引用同一个对象，改一边就是改两边
+                get def() { return shipDef; }, set def(v) { shipDef = v; },
+                get spec() { return SPEC; }, set spec(v) { SPEC = v; },
+                get hp() { return partHP; }, set hp(v) { partHP = v; },
+                get temp() { return partTemp; }, set temp(v) { partTemp = v; },
+                get dead() { return destroyed; }, set dead(v) { destroyed = v; },
+            };
+        }
+
+        // 给残骸建一个同样形状的对象（用在 makeVessel 里）
+        // 残骸有自己的 hp/temp/dead，和被毁后剩下的部件
+
         // ==================== 多航天器 ====================
         // 中间炸断之后，飞船会分离成好几截，每截都是独立航天器。
         // 为了不动那 147 处 rocket.xxx 的代码，这里保持一个约定：
@@ -1098,9 +1135,16 @@
                 state: 'idle',
                 landed: false,
                 heat: 0,
-                partHP: (function () { const h = {}; for (const p of parts) h[p.id] = PART_HP[p.type] || 80; return h; })(),
-                partTemp: (function () { const t = {}; for (const p of parts) t[p.id] = AMBIENT_TEMP; return t; })(),
-                destroyed: new Set(),
+                // 注意：下面三个用「短名字」hp/temp/dead，
+                // 和主船视图（mainView）保持同一套字段名，
+                // 这样物理代码不需要区分「这是玩家船还是残骸」。
+                hp: (function () { const h = {}; for (const p of parts) h[p.id] = PART_HP[p.type] || 100; return h; })(),
+                temp: (function () { const t = {}; for (const p of parts) t[p.id] = AMBIENT_TEMP; return t; })(),
+                dead: new Set(),
+                // 兼容老代码用的名字
+                get partHP() { return this.hp; },
+                get partTemp() { return this.temp; },
+                get destroyed() { return this.dead; },
             };
         }
         let vesselSeq = 1;
@@ -1157,77 +1201,68 @@
         }
         resetImpactBudget();
 
-        // 撞击时，每个部件离「撞到地面的那个点」有多近（0 = 正撞，1 = 最远）
-        function impactExposure(p) {
+        // 撞击时，每个部件离「撞到地面的那个点」有多近（0 = 最远，1 = 正撞）
+        // v 可以是玩家船（mainView）也可以是任何一艘残骸 —— 同一套算法。
+        function impactExposure(p, v) {
+            v = v || mainView;
             const t = PART_TYPES[p.type];
             if (!t) return 1;
             const P = PART_PX;
-            // 部件中心（本地像素，相对质心）
-            const cx = (p.x + t.w / 2 - SPEC.centerX) * P - SPEC.com.x;
-            const cy = (SPEC.box.maxY - (p.y + t.h / 2)) * P - SPEC.com.y;
-            // 转到世界坐标
-            const a = (rocket.angle - 90) * Math.PI / 180;
-            const wx = rocket.x + cx * Math.cos(a) - cy * Math.sin(a);
-            const wy = rocket.y + cx * Math.sin(a) + cy * Math.cos(a);
-            // 撞击点的方向（朝星球中心）
-            const dx = planet.x - rocket.x, dy = planet.y - rocket.y;
+            const spec = v.spec;
+            const cx = (p.x + t.w / 2 - spec.centerX) * P - spec.com.x;
+            const cy = (spec.box.maxY - (p.y + t.h / 2)) * P - spec.com.y;
+            const a = (v.angle - 90) * Math.PI / 180;
+            const wx = v.x + cx * Math.cos(a) - cy * Math.sin(a);
+            const wy = v.y + cx * Math.sin(a) + cy * Math.cos(a);
+            const dx = planet.x - v.x, dy = planet.y - v.y;
             const len = Math.hypot(dx, dy) || 1;
             const ux = dx / len, uy = dy / len;
-            // 部件在「朝地」方向上的投影：越靠下（越贴近地面），撞得越狠。
-            // u 指向星球中心，所以「部件相对飞船中心、投影到 u 上」越大 = 越靠下。
-            const proj = (wx - rocket.x) * ux + (wy - rocket.y) * uy;
-            const reach = Math.max(SPEC.width, SPEC.height) / 2 || 1;
-            // 注意是加号：proj 大 = 更靠下 = 暴露度高
+            const proj = (wx - v.x) * ux + (wy - v.y) * uy;
+            const reach = Math.max(spec.width, spec.height) / 2 || 1;
             return Math.max(0, Math.min(1, 0.5 + proj / (reach * 2)));
         }
 
-        function applyImpact(speed) {
+        // 撞击伤害：对任意船体都适用（玩家船 v=mainView，残骸 v=那个残骸）
+        function applyImpact(speed, v) {
+            v = v || mainView;
             if (speed < DAMAGE_SPEED) return 0;
-            if (impactCooldown > 0) return 0;          // 刚撞过，这次不算
-            impactCooldown = 0.35;                     // 0.35 秒内的连续碰撞只算一次
+            // 冷却按「每艘船」各算各的
+            if (!v._impactCooldown) v._impactCooldown = 0;
+            if (v._impactCooldown > 0) return 0;
+            v._impactCooldown = 0.35;
 
-            // 撞击越狠伤害越大：低于 DAMAGE_SPEED 无伤，之后线性增长。
-            // 系数调低过：以前 0.55 太狠，200 px/s 一次就能把发动机打爆，
-            // 而正常的降落速度就在 200~400 之间，等于一落地就散架。
-            // 现在改成「磨损」：轻度撞击只掉一点血，多撞几次才坏。
             const over = speed - DAMAGE_SPEED;
             const dmg = over * 0.18;
+            if (!v._impactBudget) v._impactBudget = {};
 
             let blew = 0;
-            // 谁能「当场炸」：撞得特别狠的时候，只有最迎撞的那一个部位会当场解体，
-            // 其余的按伤害扣血。这样才会「从下往上依次毁」，
-            // 而不是一下就整艘全炸（以前 DESTROY_SPEED 一超过就全灭，太粗暴）。
             let instantKillId = null;
             if (speed > DESTROY_SPEED) {
                 let best = null, bestExpo = -1;
-                for (const p of shipDef.parts) {
-                    if (destroyed.has(p.id)) continue;
-                    const e = impactExposure(p);
+                for (const p of v.def.parts) {
+                    if (v.dead.has(p.id)) continue;
+                    const e = impactExposure(p, v);
                     if (e > bestExpo) { bestExpo = e; best = p; }
                 }
                 if (best) instantKillId = best.id;
             }
 
-            for (const p of shipDef.parts) {
-                if (destroyed.has(p.id)) continue;
-                // 关键：伤害按「离撞击点多近」分配，不再所有部件平摊。
-                // 以前每个部件扣一样的血再加随机数，会导致
-                // 「发动机炸了、油箱没事、最上面的控制舱反而炸了」这种怪现象。
-                const expo = impactExposure(p);          // 0 = 最远，1 = 正撞
-                const share = 0.15 + expo * 1.7;         // 撞得近的吃 1.85 倍，远的只吃 0.15 倍
-                // 每次着陆的总伤害上限：小撞能累积磨损，但不会无限叠死
-                const room = Math.max(0, (PART_HP[p.type] || 100) * 2.5 - (impactBudget[p.id] || 0));
+            for (const p of v.def.parts) {
+                if (v.dead.has(p.id)) continue;
+                const expo = impactExposure(p, v);
+                const share = 0.15 + expo * 1.7;
+                const room = Math.max(0, (PART_HP[p.type] || 100) * 2.5 - (v._impactBudget[p.id] || 0));
                 const real = Math.min(dmg * share, room);
-                impactBudget[p.id] = (impactBudget[p.id] || 0) + real;
-                partHP[p.id] -= real;
-                if (p.id === instantKillId || partHP[p.id] <= 0) {
-                    destroyed.add(p.id);
-                    blowUpPart(p);
+                v._impactBudget[p.id] = (v._impactBudget[p.id] || 0) + real;
+                v.hp[p.id] -= real;
+                if (p.id === instantKillId || v.hp[p.id] <= 0) {
+                    v.dead.add(p.id);
+                    blowUpPart(p, v);
                     invalidateShipCache();
                     blew++;
                 }
             }
-            if (blew > 0) wreckedCount += blew;
+            if (v.isMain && blew > 0) wreckedCount += blew;
             return blew;
         }
 
@@ -1240,24 +1275,25 @@
         }
 
         // 爆炸：生成碎片；燃料箱炸了还会把里面的油一起烧掉
-        function blowUpPart(p) {
+        function blowUpPart(p, v) {
+            v = v || mainView;
             const t = PART_TYPES[p.type];
             if (!t) return;
 
             // 燃料箱被炸 → 它装的那部分油也没了。
             // 按「这个箱子占总燃料容量的比例」从当前油量里扣掉。
-            if (t.fuel > 0 && SPEC.fuelCap > 0) {
-                const share = t.fuel / SPEC.fuelCap;
-                const lost = rocket.fuel * share;   // 当前油量里属于这个箱子的部分
-                rocket.fuel = Math.max(0, rocket.fuel - lost);
-                if (lost > 0.001) {
+            if (t.fuel > 0 && v.spec.fuelCap > 0) {
+                const share = t.fuel / v.spec.fuelCap;
+                const lost = v.fuel * share;   // 当前油量里属于这个箱子的部分
+                v.fuel = Math.max(0, v.fuel - lost);
+                if (v.isMain && lost > 0.001) {
                     toastQueue.push({
                         title: '燃 料 损 失',
                         name: `燃料箱炸了，掉了 ${Math.round(lost * 100)}% 油`,
-                        desc: `剩余燃料 ${Math.round(rocket.fuel * 100)}%`,
+                        desc: `剩余燃料 ${Math.round(v.fuel * 100)}%`,
                     });
                 }
-                if (rocket.fuel <= 0 && rocket.state === 'firing') rocket.state = 'idle';
+                if (v.fuel <= 0 && v.state === 'firing') v.state = 'idle';
             }
             const P = PART_PX;
             const cx = (p.x + t.w / 2 - SPEC.centerX) * P;
@@ -1435,14 +1471,26 @@
             return born;
         }
 
-        // 更新那些失控的航天器（只有引力和惯性，不能操控）
+        // 失控航天器：走**和玩家船同一套**物理（引力/大气阻力/撞击损伤/再入加热）
+        // 以前残骸只有引力和阻力，于是「残骸永远不会被烧毁、不会掉血」，
+        // 和玩家船形成两套逻辑 —— 这就是各种不一致的根源。
         function updateDerelicts(dt) {
             for (const v of vessels) {
                 if (v.id === activeVesselId) continue;
+
+                // 冷却计时（和主船同一套机制）
+                if (v._impactCooldown > 0) v._impactCooldown -= dt;
+
+                // 再入加热 —— 残骸也会被烧毁
+                updateHeat(dt, v);
+
                 if (v.landed) continue;
+
+                // 引力
                 const g = gravityAt(v.x, v.y);
                 v.vx += g.ax * dt;
                 v.vy += g.ay * dt;
+
                 // 大气阻力
                 const dens = atmosphereDensity(v.x, v.y);
                 if (dens > 0) {
@@ -1453,9 +1501,11 @@
                         v.vy -= (v.vy / sp) * drag * dt;
                     }
                 }
+
                 v.x += v.vx * dt;
                 v.y += v.vy * dt;
-                // 撞地就停住
+
+                // 撞地：和主船一样的处理 —— 推出地面、分解速度、算撞击损伤
                 const hit = lowestCollisionPointFor(v, v.angle);
                 if (hit && hit.dist > 0 && hit.dist < planet.radius) {
                     const push = planet.radius - hit.dist;
@@ -1463,10 +1513,29 @@
                     const uy = (hit.world.y - planet.y) / hit.dist;
                     v.x += ux * push;
                     v.y += uy * push;
-                    v.vx *= -0.15;
-                    v.vy *= -0.15;
-                    if (Math.hypot(v.vx, v.vy) < 12) {
-                        v.vx = 0; v.vy = 0; v.landed = true;
+
+                    const nx = -ux, ny = -uy;
+                    const intoGround = v.vx * nx + v.vy * ny;
+                    const slideX = v.vx - intoGround * nx;
+                    const slideY = v.vy - intoGround * ny;
+
+                    // 撞击损伤 —— 残骸也会被撞坏
+                    if (intoGround > DAMAGE_SPEED) {
+                        applyImpact(intoGround, v);
+                    }
+
+                    if (intoGround > LANDING_SPEED) {
+                        // 弹一下
+                        const bounce = intoGround * 0.28;
+                        v.vx = slideX * GROUND_FRICTION - nx * bounce;
+                        v.vy = slideY * GROUND_FRICTION - ny * bounce;
+                    } else {
+                        // 停下
+                        v.vx = slideX * GROUND_FRICTION;
+                        v.vy = slideY * GROUND_FRICTION;
+                        if (Math.hypot(v.vx, v.vy) < 12) {
+                            v.vx = 0; v.vy = 0; v.landed = true;
+                        }
                     }
                 }
             }
@@ -1938,8 +2007,8 @@
                 }
             }
 
-            // 再入加热 + 碎片 + 撞击冷却
-            updateHeat(dt);
+            // 再入加热（主船）
+            updateHeat(dt, mainView);
             updateDebris(dt);
             if (impactCooldown > 0) impactCooldown -= dt;
 
@@ -2451,20 +2520,15 @@
 
         // 开局：把飞船稳稳放在星球表面（按碰撞箱算，船形怎么变都对）
         placeOnSurface();
-        // 把玩家这艘登记进航天器列表
+        // 建立统一视图，并把玩家这艘登记进航天器列表。
+        // 关键：登记的就是 mainView 本身（字段直接映射到 rocket/shipDef/SPEC），
+        // 不再是另一个「快照对象」—— 以前那个快照不会跟着主船更新，是各种不同步的来源。
+        bindMainView();
         (function registerMainVessel() {
-            const v = {
-                id: 'v0',
-                def: shipDef,
-                spec: SPEC,
-                x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy,
-                angle: rocket.angle,
-                fuel: rocket.fuel,
-                state: rocket.state,
-                landed: rocket.landed,
-                destroyed: destroyed,
-                get isMain() { return true; },
-            };
+            const v = mainView;
+            v.id = 'v0';
+            v._impactCooldown = 0;
+            v._impactBudget = {};
             activeVesselId = 'v0';
             vessels.push(v);
             vesselSeq = 1;
