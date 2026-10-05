@@ -419,7 +419,8 @@
         };
 
         // ==== 视角控制 ====
-        let camera = { x: 0, y: 0, zoom: 0.5, minZoom: 0.1, maxZoom: 5.0 };
+        // minZoom 调小 = 能拉得更远（0.02 时视野是屏幕的 50 倍宽，能看见整个星球和周边轨道）
+        let camera = { x: 0, y: 0, zoom: 0.5, minZoom: 0.012, maxZoom: 6.0 };
 
         // 物理参数
         const FIXED_DT = 1 / 60;
@@ -1092,9 +1093,20 @@
         }
 
         // ==== 缩放（滚轮，或键盘 - / =）====
+        // 缩放。步进是「自适应」的：缩得越小，每步跨度越大。
+        // 不然从 0.5 缩到 0.012 要滚 35 次，手都要断了。
+        // 做法：把 factor 相对 1 的偏差按当前缩放级别放大。
         function zoomBy(factor) {
-            camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * factor));
-            if (camera.zoom <= camera.minZoom + 0.0001) unlock('zoom_min');
+            const span = Math.log(camera.maxZoom / camera.minZoom);
+            // 当前处在整个缩放范围的位置（0 = 最近，1 = 最远）
+            const depth = Math.log(camera.zoom / camera.minZoom) / span;
+            const boost = 1 + depth * 6;            // 越远步子越大
+            const f = 1 + (factor - 1) * boost;
+            camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * f));
+            // 放宽判定：缩放范围跨了 500 倍，浮点误差会累积，
+            // 用 1e-6 这种绝对值判「到底了」根本判不到。
+            // 改成按范围比例判：到了最小值的 1.02 倍以内就算到底。
+            if (camera.zoom <= camera.minZoom * 1.02) unlock('zoom_min');
         }
 
         canvas.addEventListener('wheel', (e) => {
@@ -1132,7 +1144,7 @@
                 const ratio = pointerDistance() / pinchStartDist;
                 // 直接按手指间距的比例缩放，跟手
                 camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, pinchStartZoom * ratio));
-                if (camera.zoom <= camera.minZoom + 0.0001) unlock('zoom_min');
+                if (camera.zoom <= camera.minZoom * 1.02) unlock('zoom_min');
             }
         });
 
