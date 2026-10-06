@@ -154,12 +154,10 @@ const PART_TYPES = {
         info: '装燃料 +40',
     },
     engine: {
-        // 推力必须和 play-main.html 一致（那里是 40）。
-        // 以前这里写 80000，和实际物理差 2000 倍，
-        // 而且同一行 info 又写「推力 12000」—— 一行里三个数字。
-        name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 40,
+        // 推力必须和 play-main.html 一致（那里是 1000）。
+        name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000,
         body: '#8d99a8', edge: '#5c6874', accent: '#ff5544',
-        info: '推力 40',
+        info: '推力 1000',
     },
 };
 
@@ -168,9 +166,9 @@ const MAX_PARTS = 60;
 const SHIP_KEY = 'msp2d-ship';
 
 // 表面引力（像素制），必须和 play-main.html 的 SURFACE_GRAVITY_MS2 / M_PER_PX 一致：
-//   play-main: G0_PX = 3.71 / 50 = 0.0742 px/s²
+//   play-main: G0_PX = 3.71 / 1 = 3.71 px/s²（1 px = 1 m）
 // 造船厂用它算推重比，用同一口径才能和实际飞行手感对上。
-const G0_PX = 3.71 / 50;   // = 0.0742 px/s²
+const G0_PX = 3.71 / 1;   // = 3.71 px/s²
 
 // ============================================================
 //  船的存档

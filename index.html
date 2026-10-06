@@ -43,11 +43,11 @@
             background: #4a90d9;
             color: #fff;
             box-shadow: 0 0 30px #4a90d9;
+        }
         .menu-row { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
         #ship-line {
             margin-top: 26px; color: #6b86a6; font-size: 14px;
             font-family: monospace; letter-spacing: 1px;
-        }
         }
         #bgm-hint {
             position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
@@ -132,7 +132,7 @@
             for (const p of ship.parts) {
                 if (p.type === 'capsule') { n.capsule++; mass += 30; }
                 if (p.type === 'tank') { n.tank++; mass += 20; fuel += 40; }
-                if (p.type === 'engine') { n.engine++; mass += 25; thrust += 80000; }
+                if (p.type === 'engine') { n.engine++; mass += 25; thrust += 1000; }
             }
             el.innerText = '当前飞船：' + (ship.name || '无名')
                 + '　|　控制舱 ' + n.capsule + '　燃料箱 ' + n.tank + '　发动机 ' + n.engine

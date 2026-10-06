@@ -87,15 +87,14 @@
 const PART_TYPES = {
     capsule: { name: '控制舱', w: 2, h: 2, mass: 30, fuel: 0, thrust: 0 },
     tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0 },
-    // 和 play-main.html 一致（那里是 40）。以前这里写 1449，
-    // 是早期尺度的遗留值，反正是第四个不同的推力数字了。
-    engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 40 },
+    // 和 play-main.html 一致（那里是 1000）。
+    engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000 },
 };
 
-// 和 play-main.html 的 M_PER_PX 保持一致：1 px = 50 m。
-// 以前这里用 0.05（1 px = 5 cm），高度和速度都少了 1000 倍 ——
-// 「高度 2.45 m」其实是 2.45 km，观察站显示的数字和游戏里对不上。
-const M_PER_PX = 50;
+// 和 play-main.html 的 M_PER_PX 保持一致：1 px = 1 m。
+// 以前这里是 50（1 px = 50 m），飞船在物理世界里高达 2450 m，
+// 观察站显示的数字和游戏里也对不上。现在统一成 1 px = 1 m。
+const M_PER_PX = 1;
 
 function fmtDist(px) {
     const m = px * M_PER_PX;
@@ -229,8 +228,12 @@ function render() {
             }).join(' · ')
             : '（无部件数据）';
 
+        // 部件全部炸光 = 这艘航天器已经没了
+        const allDead = !!(it.parts && it.parts.length > 0 && it.parts.every(p => !p.alive));
+
         const tags = [];
-        if (it.derelict || !it.hasCapsule) tags.push('<span class="tag derelict2">无控制舱 · 不可操控</span>');
+        if (allDead) tags.push('<span class="tag derelict2">已完全损毁</span>');
+        else if (it.derelict || !it.hasCapsule) tags.push('<span class="tag derelict2">无控制舱 · 不可操控</span>');
         else tags.push('<span class="tag manned">有控制舱</span>');
         if (r) tags.push(r.landed ? '<span class="tag landed">已着陆</span>' : '<span class="tag flying">飞行中</span>');
 
@@ -249,10 +252,10 @@ function render() {
             body = '<div><span class="k">状态</span>本地存档（服务器未运行，看不到实时位置）</div>';
         }
 
-        const canEnter = !it.offline && it.hasCapsule && !it.derelict;
+        const canEnter = !it.offline && it.hasCapsule && !it.derelict && !allDead;
         const act = it.offline
             ? '<button class="tbtn" onclick="location.href=\'build.html\'">去造船厂</button>'
-            : `<button class="tbtn ${canEnter ? 'go' : ''}" onclick="enterVessel(${idx})">${canEnter ? '进入并操控' : '进入（只读）'}</button>`;
+            : `<button class="tbtn ${canEnter ? 'go' : ''}" onclick="enterVessel(${idx})">${allDead ? '已损毁' : (canEnter ? '进入并操控' : '进入（只读）')}</button>`;
 
         return `<div class="vessel ${it.derelict ? 'derelict' : ''} ${it.main ? 'active' : ''}">
             <div class="vhead">

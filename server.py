@@ -203,6 +203,20 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def end_headers(self):
+        # 网页文件也一律不许缓存：改完代码，刷新一下就能看到新版，
+        # 不用按 Ctrl+F5 去清缓存（以前静态文件没设 Cache-Control，
+        # 浏览器会拿旧页面，改了等于没改）。
+        try:
+            buf = b"".join(self._headers_buffer or [])
+            if b"Cache-Control" not in buf:
+                self.send_header("Cache-Control", "no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+        except Exception:
+            pass
+        super().end_headers()
+
     # ==================== 协同接口 ====================
     def _client_id(self):
         """每个浏览器标签一个 id（存 localStorage，刷新也不变）"""

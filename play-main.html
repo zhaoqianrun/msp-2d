@@ -15,12 +15,21 @@
             width: 100%; height: 100%; display: block;
             border: none; touch-action: none;
         }
+        /* 左上角竖排容器：HUD 文字在上，部件栏自动排在它下面。
+           这样 HUD 换多少行，部件栏都会跟着往下让位，不会重叠。 */
+        #top-left {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            z-index: 3; pointer-events: none;
+            display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+        }
         #hud {
-            position: absolute; top: 10px; left: 10px; z-index: 3; color: #0f0;
+            color: #0f0;
             font-family: monospace; font-size: 14px; pointer-events: none;
             text-shadow: 1px 1px 2px #000; white-space: pre;
-            max-width: calc(100vw - 740px);   /* 右边给按钮条留位置 */
+            /* 右边给按钮条留位置；窄屏时 100vw-740px 会变负数，用 260px 兜底 */
+            max-width: max(260px, calc(100vw - 740px));
             overflow: hidden;
+        }
         /* 顶部中间：本航天器的部件清单 */
         /* 时间加速按钮：并进右上角的按钮条，不单独定位 */
         #time-btn {
@@ -56,8 +65,8 @@
              第二行 = 部件清单
            两行之间不会再抢位置。 */
         #parts-bar {
-            position: absolute; top: 50px; left: 10px; right: 10px;
-            z-index: 3; pointer-events: none; white-space: nowrap;
+            align-self: stretch;   /* 撑满容器宽度（左右各留 10px），排到 HUD 下方 */
+            pointer-events: none; white-space: nowrap;
             display: flex; align-items: center; gap: 6px;
             font-family: monospace; font-size: 12px;
             background: rgba(4, 10, 18, 0.72);
@@ -67,10 +76,8 @@
             scrollbar-width: none;
         }
         #parts-bar::-webkit-scrollbar { display: none; }
-        /* 窄屏：HUD 文字会换行，部件栏跟着往下推 */
-        @media (max-width: 1100px) {
-            #parts-bar { top: 46px; }
-        }
+        /* 部件栏现在在竖排容器里，靠 flex 自动排到 HUD 下面，
+           不再需要按屏幕宽度手动调 top（旧写法会和 HUD 叠在一起）。 */
         #parts-bar .p {
             display: inline-flex; align-items: center; gap: 4px;
             padding: 2px 7px; border-radius: 6px;
@@ -243,8 +250,12 @@
 </head>
 <body>
     <canvas id="game" width="1000" height="700"></canvas>
-    <div id="hud"></div>
-    <div id="parts-bar"></div>
+    <!-- 左上角竖排：HUD 文字在上，部件栏自动排在它下面。
+         以前部件栏用写死的 top:50px，HUD 一换行就会压到一起。 -->
+    <div id="top-left">
+        <div id="hud"></div>
+        <div id="parts-bar"></div>
+    </div>
     <div id="throttle-bar"><div id="throttle-fill"></div></div>
     <div id="throttle-text">油门 100%</div>
     <div id="fuel-bar"><div id="fuel-fill"></div></div>
@@ -423,6 +434,10 @@
                 const r = await fetch(apiUrl("/api/state?since=0"));
                 const d = await r.json();
                 if (d && d.changed && d.world) {
+                    // 忽略和本端比例不一致的旧世界：
+                    // 如果操控端还是旧版本（星球半径 50000 等），照搬过来会把画面缩小几十倍。
+                    const wp = d.world.planet;
+                    if (wp && Math.abs((wp.radius || 0) - planet.radius) > 1) return;
                     remotePrev = remoteNext || d.world;
                     remoteNext = d.world;
                     remoteRecvTime = performance.now();
@@ -526,8 +541,8 @@
         // 所以贴着地面时的引力就是 g0 —— 想让星球变重只改 SURFACE_GRAVITY_MS2。
         const planet = {
             x: 500, y: 350,
-            // 像素半径 50000 = 2500 km，按 1 px = 50 m 换算
-            radius: 50000,
+            // 像素半径 2500000 = 2500 km，按 1 px = 1 m 换算
+            radius: 2500000,
             // 注意：这里**不再**存 surfaceGravity。
             // 以前存过一个 19.6，但物理实际用的是另一个值，
             // 两者差几十倍，导致 HUD 的圆轨道速度、推重比、轨道根数全部算错。
@@ -547,7 +562,9 @@
         //   zoom = 1.0    -> 1 px = 5 cm   （贴地，飞船 49 px 看得清）
         //   zoom = 0.001  -> 1 px = 50 m   （星球 20000 px 半径，能看全）
         // 跨度正好 1000 倍，覆盖「从地面到看全整个星球」
-        let camera = { x: 0, y: 0, zoom: 1.0, minZoom: 0.0008, maxZoom: 12.0 };
+        // minZoom 要能让整个星球装进屏幕：半径 2,500,000 px × zoom ≈ 250 px
+        // 所以 minZoom 取 1e-4。maxZoom 12 时飞船 49 px 会放大到 588 px，够近。
+        let camera = { x: 0, y: 0, zoom: 1.0, minZoom: 0.0001, maxZoom: 12.0 };
 
         // 物理参数
         const FIXED_DT = 1 / 60;
@@ -572,24 +589,25 @@
         let lastTime = performance.now();
 
         // 旋转速度（度/秒），改成你要的手感就调这个数
-        const ROTATE_SPEED = 180;
+        // 180 太贼了，SFS 的手感是慢而稳 —— 改成 90
+        const ROTATE_SPEED = 90;
 
         // 节流阀调节速度（每秒变化多少），按住 Shift 改成微调速度
-        const THROTTLE_RATE = 0.30;
-        const THROTTLE_FINE_RATE = 0.06;
+        // 0.30 要 3.3 秒才满油门，太肉了 —— 改成 0.50（2 秒满油门，跟手）
+        const THROTTLE_RATE = 0.50;
+        const THROTTLE_FINE_RATE = 0.08;
 
         // 缩放：按住 [ / ] 时的缩放速度（每秒乘多少）
         const ZOOM_RATE_PER_SEC = 0.25;
 
         // 燃料：满格能烧多少秒（100% 油门），以及在地面加油/卸油的速度（每秒多少格）
-        // 340 秒是按「够入轨 + 余量」算出来的：
-        //   满油净加速度 = 40/115 - 3.71/50 = 0.2736 px/s²
-        //   加速到圆轨道速度 60.9 px/s 需要约 223 秒
-        //   留 1.5 倍余量（爬升、掉头、修正）-> 340 秒
+        // 680 秒是按「够入轨 + 余量」算出来的：
+        //   满油净加速度 = 20/115 - 3.71/50 = 0.0996 px/s²
+        //   加速到圆轨道速度 60.9 px/s 需要约 611 秒
+        //   留 1.1 倍余量（爬升、掉头、修正）-> 680 秒
         //
-        // 燃料变多是因为推力降到 40（为了「关机后能快点停」），
-        // 爬升变慢就得给更多油 —— 这两个是绑在一起的。
-        const FUEL_BURN_SECONDS = 340;  // 满油门烧完一箱要多少秒
+        // 推力从 40 降到 20 后，同样多的油可以烧两倍时间。
+        const FUEL_BURN_SECONDS = 680;  // 满油门烧完一箱要多少秒
         const FUEL_FILL_RATE = 0.6;     // 每秒补 60%，大约 1.7 秒加满
 
         // ==================== 部件（和 build.html 的定义必须一致）====================
@@ -598,28 +616,34 @@
                        body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9' },
             tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
                        body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800' },
-            // 推力 40（配合物理尺度 1px=50m、质量 115、重力 3.71 m/s²）
-            // 推重比 40/115/(3.71/50) = 4.7 : 1
+            // 推力 1000（配合物理尺度 1px=1m、质量 115、重力 3.71 m/s²）
+            // 推重比 1000/115/3.71 = 2.35 : 1
             //
-            // 【为什么不是更高】推重比越高，同样几秒点火获得的速度越大，
-            // 关机后要滑行越久才停下（减速时间 ≈ v/g）。
-            //   推力 80 (TWR 9.4): 3秒点火 -> 93 m/s，关机后要 87 秒才落地
-            //   推力 40 (TWR 4.7): 3秒点火 -> 41 m/s，关机后约 25 秒落地
-            // 权衡后取 40：起飞有分量，关机后不会飘太久。
-            // 注意：推力必须和 build.html / station.html 保持一致。
-            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 40,
+            // 比例从 1px=50m 改成 1px=1m 后，引力像素加速度大了 50 倍，
+            // 所以推力也要×50（20 → 1000）才能保持同样的推重比和飞行时间。
+            // 注意：推力必须和 build.html / station.html / index.html 保持一致。
+            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000,
                        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
         };
         const PART_PX = 7;           // 游戏里一格画多少像素（调小 = 飞船看着更小；建造页是 20）
 
         // ==================== 尺度系统（单一比例）====================
-        // 只有这一个比例：1 像素 = 50 米（恒定，不随缩放变）
+        // 只有这一个比例：1 像素 = 1 米（恒定，不随缩放变）
         //
-        //   星球 50000 px × 50 = 2500 km  ✅
-        //   部件 1 格 = 7 px × 50 = 350 m
+        //   星球 2500000 px × 1 = 2500 km  ✅
+        //   部件 1 格 = 7 px × 1 = 7 m（默认船 14 m 宽 × 49 m 高，正常火箭大小）
         //
         // 想改尺度只改这一个数：它同时决定飞船大小和星球大小。
-        const M_PER_PX = 50;              // 全局唯一比例：1 px = 50 m
+        // 【1 px = 1 m】以前是 1 px = 50 m，结果飞船在物理世界里高达 2450 m
+        // （49 px × 50 m），几十米/秒相对这么大的船简直没动，屏幕上每秒不到 1 像素。
+        // SFS 的手感是「船几十米高、速度几十米/秒，屏幕上看得到明显移动」——
+        // 那正是 1 px ≈ 1 m。所以这里改成 1。
+        //
+        // 改这一个数，下面这些全部跟着自动换算（它们都用 M_PER_PX）：
+        //   引力 G0_PX = g / M_PER_PX
+        //   星球像素半径、大气标高、距离/速度显示……
+        // 唯独「像素制」的力（推力、阻力）要手动跟着缩放，见各自的注释。
+        const M_PER_PX = 1;               // 全局唯一比例：1 px = 1 m
 
         const PLANET_RADIUS_KM = 2500;    // 星球真实半径 2500 km
         const PLANET_RADIUS_M = PLANET_RADIUS_KM * 1000;
@@ -637,7 +661,7 @@
         // 关键收益：关机后减速时间 ≈ v/g，比 1.35 时快 2.75 倍。
         const SURFACE_GRAVITY_MS2 = 3.71;
         // 换算成像素加速度，供物理使用：a_px = a_m / M_PER_PX
-        const G0_PX = SURFACE_GRAVITY_MS2 / M_PER_PX;   // = 0.0742 px/s²
+        const G0_PX = SURFACE_GRAVITY_MS2 / M_PER_PX;   // = 3.71 px/s²（1px = 1m）
 
         // 像素 → 距离文字。距离换算与缩放无关（缩放只影响看起来多大）。
         function fmtDistance(px) {
@@ -845,6 +869,17 @@
             return best;
         }
 
+        // 真正的「离地高度」：量到船底（离星球最近的那个碰撞点），不是量飞船原点。
+        // 飞船原点在船体内部，直接量它会虚高半个船身 ——
+        // 默认船的质心离底面约 25 px，旧比例 1px=50m 时就是 1.26 km，
+        // 停在地上却显示「高度 1.26 km」，看着像浮在半空 / 碰撞失效。
+        function surfaceAltitudePx() {
+            const hit = lowestCollisionPoint(rocket.angle);
+            if (hit && hit.dist > 0) return hit.dist - planet.radius;
+            const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y) || 1;
+            return r - planet.radius;
+        }
+
         // 把飞船放到「碰撞箱最深点正好贴在地表」的位置。
         // 不能简单写 planet.radius —— rocket.y 是船体本地原点，
         // 最深的碰撞点可能在原点下方（取决于你拼的船形）。
@@ -1023,7 +1058,7 @@
             const rx = rocket.x - planet.x;
             const ry = rocket.y - planet.y;
             const r = Math.sqrt(rx * rx + ry * ry) || 1;
-            const alt = r - planet.radius;
+            const alt = surfaceAltitudePx();   // 量到船底，和 HUD 一致
             const speed = Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
             const ang = Math.atan2(ry, rx);
 
@@ -1145,7 +1180,9 @@
                 if (hot) {
                     const expo = partWindExposure(p, v);
                     const over = sp - REENTRY_SPEED;
-                    const rate = over * over * 0.0016 * dens * (0.25 + expo * 1.6);
+                    // 系数 3e-4：1500 m/s 再入时约 147 °/s，燃料箱(260°C)撑约 1.7 秒，
+                    // 返回舱(900°C)能撑到最后 —— 和 README 里说的「燃料箱最先烧穿」一致。
+                    const rate = over * over * 3e-4 * dens * (0.25 + expo * 1.6);
                     v.temp[p.id] += rate * dt;
                 } else {
                     const d = v.temp[p.id] - AMBIENT_TEMP;
@@ -1210,20 +1247,22 @@
         //
         // 现在按**终端速度**定系数：CAP = G0 / v_term²
         // 终端速度 = 阻力恰好等于重力时的速度，也就是自由落体的最大速度。
-        // 取地面终端速度 800 m/s，得到 CAP = 2.9e-4。
+        // 取地面终端速度 1200 m/s（= 1200 px/s，因为现在 1px = 1m），
+        // 得到 CAP = 3.71 / 1200² = 2.6e-6。
         //
         // 检查表（密度按 23.1 km 标高，重力 3.71 m/s²）：
         //   速度      0 km 阻力  占重力    23 km 阻力  占重力
-        //    100 m/s     0.029      1%        0.011      0%
-        //    400 m/s     0.464     13%        0.172      5%
-        //    800 m/s     1.856     50%        0.687     19%
-        //   1600 m/s     7.424    200%        2.748     74%
-        //   3045 m/s    26.88     724%        9.95     268%   <- 入轨速度
+        //    100 m/s     0.026      1%        0.010      0%
+        //    400 m/s     0.416     11%        0.154      4%
+        //    800 m/s     1.664     45%        0.616     17%
+        //   1200 m/s     3.744    101%        1.386     37%   <- 终端速度
+        //   1600 m/s     6.656    179%        2.464     66%
+        //   3045 m/s    24.11     650%        8.925    241%   <- 入轨速度
         //
-        // 效果：低空有明显刹车，高速再入会被大气剧烈减速；
+        // 效果：低空有温和刹车，高速再入会被大气明显减速；
         //       高空（>100 km）阻力快速消失，正常入轨不受影响。
-        const DRAG_COEF = 2.9e-4;
-        const REENTRY_SPEED = 120;          // 超过这个速度冲进大气就开始发光
+        const DRAG_COEF = 2.6e-6;
+        const REENTRY_SPEED = 800;          // 超过这个速度（m/s）冲进大气就开始发光
 
         function atmoThickness() { return planet.radius * ATMO_RATIO; }
 
@@ -1232,8 +1271,7 @@
         // 大气改成指数衰减后，不再有「内 / 外」这种硬边界 ——
         // 所以改成显示**密度等级**，玩家能看到阻力是渐渐消失的。
         function atmoStatusText() {
-            const r = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
-            const alt = r - planet.radius;
+            const alt = surfaceAltitudePx();   // 量到船底，和 HUD 一致
             const d = atmosphereDensity(rocket.x, rocket.y);
             const pct = d * 100;
             const altKm = (alt * DIST_M_PER_PX / 1000);
@@ -1493,6 +1531,14 @@
         function resetImpactBudget() {
             impactBudget = {};
             for (const p of shipDef.parts) impactBudget[p.id] = 0;
+            // 现在撞击伤害实际用的是「每艘船自己的」_impactBudget / _impactCooldown
+            // （见 applyImpact）。上面这个旧的 impactBudget 已经没人用了，
+            // 所以这里必须把统一视图那份也清掉 ——
+            // 否则配额一辈子不清零，攒满之后部件就永久免疫，船又撞不坏了。
+            if (mainView) {
+                mainView._impactBudget = {};
+                mainView._impactCooldown = 0;
+            }
         }
         resetImpactBudget();
 
@@ -1655,6 +1701,10 @@
             rocket.heat = 0;
             stats.escapedFar = false;
             placeOnSurface();
+            {   // 相机跟着回到地面上的新位置
+                const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
+                camera.x = camPt.x; camera.y = camPt.y;
+            }
             if (main) {
                 main.x = rocket.x; main.y = rocket.y;
                 main.vx = 0; main.vy = 0; main.landed = true;
@@ -1665,6 +1715,102 @@
                 name: '飞船已修复并放回地面',
                 desc: '燃料满格，部件全好',
             });
+            saveMission();   // 把「修好的新一局」写进本地任务存档
+        }
+
+        // ==================== 本局任务自动存档 ====================
+        // 目的：把「当前飞船（含已炸掉的部件、耐久、分离出的残骸、位置）」存到浏览器本地。
+        // 以前这些只在内存里 —— 页面一刷新、或从观察站点「进入」重开页面就全没了，
+        // 于是明明炸光的飞船会「奇迹复原」成完好状态，观察站里也一直显示那艘完好的旧船。
+        const MISSION_KEY = 'msp2d-mission-v1';
+        let missionRestored = false;    // 这一局是不是从本地任务存档恢复的
+        let missionSig = '';            // 恢复时那艘船的类型签名（用于判断「换船了就作废」）
+        let lastMissionSave = 0;
+
+        // 船的类型签名：只看部件种类，不看位置/耐久。换了一艘不同搭配的船就作废旧任务。
+        function shipPartsSig(parts) {
+            return JSON.stringify((parts || []).map(p => p && p.type).sort());
+        }
+
+        function saveMission() {
+            try {
+                const data = {
+                    v: 1,
+                    sig: shipPartsSig(pristineShip.parts),   // 用「这一局的完好船」做签名
+                    ship: shipDef,                            // 当前主船（分离后可能只剩一截）
+                    destroyed: [...destroyed],
+                    hp: partHP,
+                    rocket: {
+                        x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy,
+                        angle: rocket.angle, throttle: rocket.throttle, fuel: rocket.fuel,
+                        state: rocket.state, landed: rocket.landed, heat: rocket.heat || 0,
+                    },
+                    camera: { x: camera.x, y: camera.y, zoom: camera.zoom },
+                    vessels: vessels.filter(v => v.id !== activeVesselId).map(v => ({
+                        def: v.def, hp: v.hp, temp: v.temp, dead: [...v.dead],
+                        x: v.x, y: v.y, vx: v.vx, vy: v.vy, angle: v.angle,
+                        fuel: v.fuel, throttle: v.throttle, state: v.state,
+                        landed: v.landed, heat: v.heat || 0,
+                    })),
+                };
+                localStorage.setItem(MISSION_KEY, JSON.stringify(data));
+            } catch (e) { /* 浏览器不给用 localStorage 就算了 */ }
+        }
+
+        function clearMission() {
+            try { localStorage.removeItem(MISSION_KEY); } catch (e) {}
+        }
+
+        // 恢复上一次的任务。成功返回 true（调用方就别再把船摆回地面了）。
+        function loadMission() {
+            try {
+                const raw = localStorage.getItem(MISSION_KEY);
+                if (!raw) return false;
+                const d = JSON.parse(raw);
+                if (!d || d.v !== 1) return false;
+                if (!d.ship || !Array.isArray(d.ship.parts) || d.ship.parts.length === 0) return false;
+                if (d.sig !== shipPartsSig(pristineShip.parts)) return false;   // 换过船，旧任务作废
+
+                const parts = d.ship.parts.filter(p => p && PART_TYPES[p.type]);
+                if (parts.length === 0) return false;
+
+                // 主船（含被炸掉的部件 id、剩余耐久）
+                shipDef = { version: 1, name: d.ship.name || '当前航天器', parts };
+                SPEC = shipSpec(shipDef);
+                destroyed = new Set(Array.isArray(d.destroyed) ? d.destroyed : []);
+                partHP = {};
+                for (const p of shipDef.parts) {
+                    partHP[p.id] = (d.hp && typeof d.hp[p.id] === 'number') ? d.hp[p.id] : (PART_HP[p.type] || 100);
+                }
+                partTemp = initPartTemp();
+                invalidateShipCache();
+                if (d.rocket && typeof d.rocket === 'object') Object.assign(rocket, d.rocket);
+                if (d.camera && typeof d.camera === 'object') Object.assign(camera, d.camera);
+
+                // 分离出去、还在惯性飞的残骸
+                vessels = vessels.filter(v => v.id === activeVesselId);
+                vesselSeq = 1;
+                if (Array.isArray(d.vessels)) {
+                    for (const w of d.vessels) {
+                        if (!w || !w.def || !Array.isArray(w.def.parts)) continue;
+                        const wp = w.def.parts.filter(p => p && PART_TYPES[p.type]);
+                        if (wp.length === 0) continue;
+                        const v = makeVessel(wp, w.x, w.y, w.vx || 0, w.vy || 0, w.angle || 0,
+                                             (typeof w.fuel === 'number' ? w.fuel : 1));
+                        if (w.hp) v.hp = w.hp;
+                        if (w.temp) v.temp = w.temp;
+                        v.dead = new Set(Array.isArray(w.dead) ? w.dead : []);
+                        v.throttle = (typeof w.throttle === 'number') ? w.throttle : 1;
+                        v.state = w.state || 'idle';
+                        v.landed = !!w.landed;
+                        v.heat = w.heat || 0;
+                        vessels.push(v);
+                    }
+                }
+                missionRestored = true;
+                missionSig = d.sig;
+                return true;
+            } catch (e) { return false; }
         }
 
         // ==================== 分离 ====================
@@ -1971,11 +2117,12 @@
             });
         }
 
-        // 触控面板：触屏设备默认打开；桌面按 T 或点右上角「触控」开关
-        const isTouchDevice = (typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0) || ('ontouchstart' in window);
-        let touchPanelOn = isTouchDevice;
+        // 触控面板：**默认打开**（桌面、手机都显示，鼠标点也行）。
+        // 想收起来按 T 或点右上角「触控」，选择会记住。
+        let touchPanelOn = true;
         try {
-            const savedTouch = localStorage.getItem('msp2d-touch');
+            // 换了新的存档键：以前记得「关」的旧记录一律作废，保证这次一定显示出来
+            const savedTouch = localStorage.getItem('msp2d-touch-v2');
             if (savedTouch === '1') touchPanelOn = true;
             if (savedTouch === '0') touchPanelOn = false;
         } catch (e) {}
@@ -1986,7 +2133,7 @@
 
         function toggleTouchPanel() {
             touchPanelOn = !touchPanelOn;
-            try { localStorage.setItem('msp2d-touch', touchPanelOn ? '1' : '0'); } catch (e) {}
+            try { localStorage.setItem('msp2d-touch-v2', touchPanelOn ? '1' : '0'); } catch (e) {}
             applyTouchPanel();
         }
 
@@ -2167,11 +2314,9 @@
             if (dens > 0) {
                 const sp = Math.hypot(rocket.vx, rocket.vy);
                 if (sp > 1) {
-                    // 发动机开着往上冲时，阻力打三折 ——
-                    // 这是游戏性考虑：玩家明确想上升，被大气拖住会非常难受。
-                    // 关机后（自由落体/再入）阻力恢复全额，减速伞效果保留。
-                    const pushing = rocket.state === 'firing' && rocket.throttle > 0.05;
-                    const drag = DRAG_COEF * dens * sp * sp * (pushing ? 0.3 : 1);
+                    // 阻力始终一致 —— 不管发动机开不开，物理都一样。
+                    // SFS 里没有「点火时阻力打折」这种 hack。
+                    const drag = DRAG_COEF * dens * sp * sp;
                     rocket.vx -= (rocket.vx / sp) * drag * dt;
                     rocket.vy -= (rocket.vy / sp) * drag * dt;
                 }
@@ -2199,7 +2344,7 @@
             if (moveLen > maxStep) {
                 rocket.x -= fullMoveX;
                 rocket.y -= fullMoveY;
-                const sub = Math.min(8, Math.ceil(moveLen / maxStep));
+                const sub = Math.min(16, Math.ceil(moveLen / maxStep));
                 const sdt = dt / sub;
                 for (let i = 0; i < sub; i++) {
                     rocket.x += rocket.vx * sdt;
@@ -2318,6 +2463,11 @@
             // 再入加热（主船）
             updateHeat(dt, mainView);
             updateDebris(dt);
+            // 主船的撞击冷却要随时间恢复。
+            // 以前这里减的是另一个没人用的 impactCooldown，而 applyImpact 用的是
+            // 每艘船自己的 v._impactCooldown —— 主船这个值一旦被设成 0.35 就永远不归零，
+            // 于是第一次撞击之后，后面所有撞击都被判成「还在冷却」而免疫，船就撞不坏了。
+            mainView._impactCooldown = Math.max(0, mainView._impactCooldown - dt);
             if (impactCooldown > 0) impactCooldown -= dt;
 
             // 成就检查 + 弹出横幅
@@ -2654,8 +2804,8 @@
 
             // 相机对准质心 —— 原点在船底，直接跟原点的话大船会偏在屏幕下方看不全
             const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
-            camera.x += (camPt.x - camera.x) * 0.1;
-            camera.y += (camPt.y - camera.y) * 0.1;
+            camera.x += (camPt.x - camera.x) * 0.15;
+            camera.y += (camPt.y - camera.y) * 0.15;
 
             ctx.fillStyle = '#050510';
             ctx.fillRect(0, 0, canvasW, canvasH);
@@ -2826,7 +2976,8 @@
             const dx = rocket.x - planet.x;
             const dy = rocket.y - planet.y;
             const centerDist = Math.sqrt(dx*dx + dy*dy);
-            const surfaceDist = centerDist - planet.radius;
+            // 离地高度量到船底（碰撞点），停在地上就是 0，不再虚高半个船身
+            const surfaceDist = surfaceAltitudePx();
 
             const speedNum = Math.sqrt(rocket.vx**2 + rocket.vy**2);
             const speed = speedNum.toFixed(1);
@@ -2907,6 +3058,12 @@
             renderPartsBar();
             renderTimeBtn();
 
+            // ==== 本局任务自动存档（每秒一次；观战端不存，免得用别人的画面覆盖自己的局）====
+            if (!isSpectator() && now - lastMissionSave > 1000) {
+                lastMissionSave = now;
+                saveMission();
+            }
+
             // ==== 终端日志（每秒输出一次） ====
             if (now - lastLogTime > LOG_INTERVAL) {
                 lastLogTime = now;
@@ -2943,8 +3100,6 @@
         requestAnimationFrame(gameLoop);
         pollControl();
 
-        // 开局：把飞船稳稳放在星球表面（按碰撞箱算，船形怎么变都对）
-        placeOnSurface();
         // 建立统一视图，并把玩家这艘登记进航天器列表。
         // 关键：登记的就是 mainView 本身（字段直接映射到 rocket/shipDef/SPEC），
         // 不再是另一个「快照对象」—— 以前那个快照不会跟着主船更新，是各种不同步的来源。
@@ -2958,6 +3113,14 @@
             vessels.push(v);
             vesselSeq = 1;
         })();
+        // 有上一局的任务存档（含损毁、残骸）就接着玩；没有才把船摆到地面上。
+        if (!loadMission()) {
+            // 把飞船稳稳放在星球表面（按碰撞箱算，船形怎么变都对）
+            placeOnSurface();
+            // 相机直接对准飞船，别从 (0,0) 慢慢飘过来（那样前几帧像黑屏）
+            const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
+            camera.x = camPt.x; camera.y = camPt.y;
+        }
         setInterval(pollControl, CTRL_INTERVAL_MS);
 
         // 如果服务器上有造船厂存的飞船，就用它（手机造的船电脑也能飞）
@@ -2968,6 +3131,11 @@
                 if (!d || !d.ship || !Array.isArray(d.ship.parts) || d.ship.parts.length === 0) return;
                 const parts = d.ship.parts.filter(p => p && PART_TYPES[p.type]);
                 if (parts.length === 0) return;
+                // 这一局若是从任务存档恢复的，而且服务器上的船和它是同一艘，
+                // 就**不要**用完好的船去覆盖当前这艘 —— 否则刚恢复的损毁状态又被抹平了。
+                if (missionRestored && shipPartsSig(parts) === missionSig) return;
+                // 换了一艘船（或在造船厂造了新的搭配）—— 旧任务作废
+                clearMission();
                 shipDef = { version: 1, name: d.ship.name || '无名', parts };
                 pristineShip = JSON.parse(JSON.stringify(shipDef));   // 重置时回到这艘
                 invalidateShipCache();
@@ -2981,6 +3149,13 @@
                 });
             } catch (e) { /* 没服务器就用本地的 */ }
         })();
+
+        // 离开页面（刷新 / 跳去观察站）前，赶紧把这一局存一下，
+        // 这样进观察站再回来，飞船还是走之前那个样子（不会奇迹复原）。
+        window.addEventListener('pagehide', () => { if (!isSpectator()) saveMission(); });
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && !isSpectator()) saveMission();
+        });
 
         // ==== 存档/读档 ====
         function saveGame() {
@@ -3014,7 +3189,8 @@
                         return;
                     }
                     Object.assign(rocket, data.rocket);
-                    if (data.planet) Object.assign(planet, data.planet);
+                    // 星球参数只信代码里的：旧存档里的半径是旧比例（50000 / 20000），
+                    // 一旦覆盖会把整个世界缩小几十倍，位置也全乱。所以不读存档的 planet。
                     if (data.camera) Object.assign(camera, data.camera);
                     // 老存档里可能带着旧的引力字段（gravity / surfaceGravity）。
                     // 这些字段已经废弃，而且**必须删掉** —— 留着会覆盖掉新的
@@ -3031,6 +3207,11 @@
                     delete rocket.thrustPower;   // 老存档里的固定推力已经不用了（现在按质量算）
                     if (typeof rocket.teleporting === 'boolean') delete rocket.teleporting;
                     rocket.angle = ((rocket.angle % 360) + 360) % 360;
+                    // 旧比例的存档位置可能落在星球内部（数值也异常）—— 直接放回地面
+                    const rr = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
+                    if (!isFinite(rr) || rr < planet.radius) {
+                        placeOnSurface();
+                    }
                     camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom));
                     alert('读档成功！');
                 })
