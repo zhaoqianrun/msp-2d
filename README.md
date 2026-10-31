@@ -210,6 +210,21 @@ MSP-2D/
 是物理实际使用的值。**HUD 上的圆轨道速度、推重比、轨道根数全部由它派生**，
 想改星球轻重只改 `SURFACE_GRAVITY_MS2` 一个数即可。
 
+## 开发
+
+代码已模块化（ES Module，零构建零依赖）：`js/main.js` 是组合根，
+`js/core`、`js/ship`、`js/world`、`js/ui`、`js/render` 是分层模块。
+
+```bash
+node tools/tests/run.mjs   # 无头回归测试：不用开浏览器，Node 直接跑真实游戏逻辑
+```
+
+回归套件覆盖：启动冒烟、引力/大气/格式化常量、点火与燃料、
+发动机损毁守卫、全毁锁操作、换船状态重建、飞船分离质量实时化、
+船体规格与质心计算。改完物理/损毁/换船相关代码后跑一遍，全绿再提交。
+
+冒烟手测清单见 `docs/SMOKE-TEST.md`。
+
 ## 组织
 
 **NotNormal** —— 加入请私信 B 站 <https://space.bilibili.com/258037329>
