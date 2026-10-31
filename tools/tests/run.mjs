@@ -535,6 +535,38 @@ test('[着陆姿态] shipTiltDeg：竖直 0° / 横躺 90° / 倒扣 180°', () 
     resetToGround();
 });
 
+test('[造船] 悬空零件载入过滤：保留含控制舱的连通组', () => {
+    // 用户实测的坏船：主船 + 三个悬空降落伞（截图 bug）
+    const bad = { version: 1, name: '坏船', parts: [
+        { id: 'm1', type: 'capsule', x: 0, y: 0 },
+        { id: 'm2', type: 'tank',    x: 0, y: 2 },
+        { id: 'm3', type: 'engine',  x: 0, y: 5 },
+        { id: 'f1', type: 'chute',   x: 20, y: 0 },
+        { id: 'f2', type: 'chute',   x: 22, y: 0 },
+        { id: 'f3', type: 'chute',   x: 24, y: 0 },
+    ]};
+    const fixed = t.sanitizeShipDef(bad);
+    assert(fixed.dropped === 3, '应丢弃 3 个悬空件, got ' + fixed.dropped);
+    assert(fixed.def.parts.length === 3, '应保留主船 3 件');
+    assert(fixed.def.parts.some(p => p.type === 'capsule'), '保留组应含控制舱');
+    // 含控制舱的小组 优先于 无控制舱的大组
+    const bad2 = { version: 1, name: 'x', parts: [
+        { id: 'a', type: 'tank',    x: 0, y: 0 },
+        { id: 'b', type: 'tank',    x: 0, y: 3 },
+        { id: 'c', type: 'capsule', x: 30, y: 0 },
+    ]};
+    const fixed2 = t.sanitizeShipDef(bad2);
+    assert(fixed2.def.parts.length === 1 && fixed2.def.parts[0].type === 'capsule',
+           '应保留控制舱所在组（哪怕它更小）');
+    assert(fixed2.dropped === 2, '应丢弃 2 个悬空件');
+    // 正常船不受影响
+    assert(t.sanitizeShipDef({ version: 1, name: 'ok', parts: [
+        { id: 'k1', type: 'capsule', x: 0, y: 0 },
+        { id: 'k2', type: 'engine',  x: 0, y: 2 },
+    ]}).dropped === 0, '连通船不应被修整');
+    resetToGround();
+});
+
 // ============================================================
 
 console.log('\n==========================================');

@@ -351,6 +351,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 const s = JSON.parse(raw);
                 if (!s || !Array.isArray(s.parts) || s.parts.length === 0) return defaultShip();
                 s.parts = s.parts.filter(p => p && PART_TYPES[p.type]);
+                const fix = sanitizeShipDef(s);
+                s.parts = fix.def.parts;
                 return s.parts.length ? s : defaultShip();
             } catch (e) { return defaultShip(); }
         }
@@ -1180,7 +1182,9 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 if (!d.ship || !Array.isArray(d.ship.parts) || d.ship.parts.length === 0) return false;
                 if (d.sig !== shipPartsSig(pristineShip.parts)) return false;   // 换过船，旧任务作废
 
-                const parts = d.ship.parts.filter(p => p && PART_TYPES[p.type]);
+                const fixed = sanitizeShipDef({ version: 1, name: d.ship.name || '当前航天器',
+                                                parts: d.ship.parts.filter(p => p && PART_TYPES[p.type]) });
+                const parts = fixed.def.parts;
                 if (parts.length === 0) return false;
 
                 // 主船（含被炸掉的部件 id、剩余耐久）
@@ -1255,6 +1259,25 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 (groups[r] = groups[r] || []).push(p);
             }
             return Object.values(groups);
+        }
+
+        // ==================== 载入过滤：悬空零件 ====================
+        // 造船厂有「必须相邻」的放置规则，但旧存档/手改数据可能带着悬空零件
+        //（发射时整船是一个刚体，悬空件跟着飞，视觉上就是「浮空零件」）。
+        // 载入时只保留一个连通组：优先保留含控制舱的组，否则保留最大的组。
+        function sanitizeShipDef(def) {
+            if (!def || !Array.isArray(def.parts) || def.parts.length === 0) return { def, dropped: 0 };
+            const groups = findConnectedGroups(def.parts, new Set());
+            if (groups.length <= 1) return { def, dropped: 0 };
+            let best = groups[0];
+            for (const g of groups) {
+                const bestCap = best.some(p => p.type === 'capsule');
+                const gCap = g.some(p => p.type === 'capsule');
+                if (gCap && !bestCap) best = g;
+                else if (gCap === bestCap && g.length > best.length) best = g;
+            }
+            return { def: { version: def.version, name: def.name, parts: best },
+                     dropped: def.parts.length - best.length };
         }
 
         // 把当前飞船按「还连在一起的部件」拆成若干航天器
@@ -2755,8 +2778,15 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 const r = await fetch(apiUrl('/api/ship'));
                 const d = await r.json();
                 if (!d || !d.ship || !Array.isArray(d.ship.parts) || d.ship.parts.length === 0) return;
-                const parts = d.ship.parts.filter(p => p && PART_TYPES[p.type]);
+                let parts = d.ship.parts.filter(p => p && PART_TYPES[p.type]);
                 if (parts.length === 0) return;
+                const fix = sanitizeShipDef({ version: 1, name: d.ship.name || '无名', parts });
+                parts = fix.def.parts;
+                if (parts.length === 0) return;
+                if (fix.dropped > 0) {
+                    toastQueue.push({ title: '船 体 修 整', name: `已移除 ${fix.dropped} 个悬空部件`,
+                                      desc: '悬空零件连不上船体，无法作为一个整体飞行' });
+                }
                 // 这一局若是从任务存档恢复的，而且服务器上的船和它是同一艘，
                 // 就**不要**用完好的船去覆盖当前这艘 —— 否则刚恢复的损毁状态又被抹平了。
                 if (missionRestored && shipPartsSig(parts) === missionSig) return;
@@ -2898,7 +2928,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             setShipDef, placeOnSurface, applyImpact, splitVessel, checkSeparation,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
             onKeyDown, blowUpPart, predictPath, rocketRenderPos, resetInterp,
-            toggleChute, hasChute, shipTiltDeg,
+            toggleChute, hasChute, shipTiltDeg, sanitizeShipDef,
             get chuteState() { return chuteState; },
             set chuteState(v) { chuteState = v; },   // 测试直接设伞状态
             get chuteDragNow() { return chuteDragNow; },

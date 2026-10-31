@@ -232,6 +232,13 @@ function validateShip(s) {
     const st = shipStats(s);
     if (s.parts.length === 0) return { ok: false, msg: '船是空的，先放点部件' };
     if (s.parts.length > MAX_PARTS) return { ok: false, msg: `部件太多了（${s.parts.length} > ${MAX_PARTS}）` };
+    // 连通性兜底：所有部件必须构成一个整体（放置规则挡不住的旧档/手改数据在这拦住）
+    const groups = connectedGroups(s.parts);
+    if (groups.length > 1) {
+        let biggest = groups[0];
+        for (const g of groups) if (g.length > biggest.length) biggest = g;
+        return { ok: false, msg: `有 ${s.parts.length - biggest.length} 个部件悬空，连不上船` };
+    }
     if (st.count.capsule < 1) return { ok: false, msg: '要有控制舱才能驾驶' };
     if (st.count.engine < 1) return { ok: false, msg: '要有发动机才能飞' };
     if (st.thrust <= 0) return { ok: false, msg: '发动机没有推力' };
@@ -580,9 +587,45 @@ function overlaps(type, gx, gy, ignoreId) {
     return false;
 }
 
+// 找出连通组（并查集，1 格容差——与游戏内分离判定同款）。
+// validateShip 用它做连通性兜底校验。
+function connectedGroups(parts) {
+    const parent = {};
+    for (const p of parts) parent[p.id] = p.id;
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; }
+    for (let i = 0; i < parts.length; i++) {
+        for (let j = i + 1; j < parts.length; j++) {
+            const a = parts[i], b = parts[j];
+            const ta = PART_TYPES[a.type], tb = PART_TYPES[b.type];
+            if (a.x <= b.x + tb.w + 1 && a.x + ta.w >= b.x - 1 &&
+                a.y <= b.y + tb.h + 1 && a.y + ta.h >= b.y - 1) union(a.id, b.id);
+        }
+    }
+    const groups = {};
+    for (const p of parts) (groups[find(p.id)] = groups[find(p.id)] || []).push(p);
+    return Object.values(groups);
+}
+
+// 新部件是否与已有结构相邻（贴面 / 角接触都算）——不允许悬空零件
+function touchesStructure(type, gx, gy, ignoreId) {
+    const t = PART_TYPES[type];
+    for (const p of ship.parts) {
+        if (p.id === ignoreId) continue;
+        const pt = PART_TYPES[p.type];
+        if (gx <= p.x + pt.w && gx + t.w >= p.x &&
+            gy <= p.y + pt.h && gy + t.h >= p.y) return true;
+    }
+    return false;
+}
+
 function canPlace(type, gx, gy, ignoreId) {
     if (gy < 0) return false;                         // 不能埋到地面以下
     if (overlaps(type, gx, gy, ignoreId)) return false;
+    // 不允许悬空零件：必须与已有结构相邻。
+    // 例外：空船的第一个部件；以及拖动「全船仅剩的部件」时（否则它永远挪不动）。
+    const others = ignoreId ? ship.parts.filter(p => p.id !== ignoreId) : ship.parts;
+    if (others.length > 0 && !touchesStructure(type, gx, gy, ignoreId)) return false;
     return true;
 }
 
