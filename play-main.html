@@ -622,6 +622,10 @@
             // 比例从 1px=50m 改成 1px=1m 后，引力像素加速度大了 50 倍，
             // 所以推力也要×50（20 → 1000）才能保持同样的推重比和飞行时间。
             // 注意：推力必须和 build.html / station.html / index.html 保持一致。
+            // 降落伞：只在大气层里有减速作用。按 P 展开，再按 P 切断。
+            // 切断的伞不能再展开，必须降落到地面才能重新包好。
+            chute:   { name: '降落伞', w: 2, h: 2, mass: 8, fuel: 0, thrust: 0,
+                       body: '#ff9a3c', edge: '#c46a1a', accent: '#ffe0a0' },
             engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000,
                        body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
         };
@@ -858,6 +862,39 @@
         }
 
         // 找出离星球中心最近的那个碰撞点（也就是"最低"的那个）
+        // ==================== 降落伞操作 ====================
+        function toggleChute() {
+            if (!hasChute()) {
+                toastQueue.push({ title: '没 有 降 落 伞', name: '造船厂里装一个吧', desc: '部件列表 > 降落伞' });
+                return;
+            }
+            if (chuteState === 'packed') {
+                chuteState = 'open';
+                toastQueue.push({
+                    title: '降 落 伞 展 开',
+                    name: '高度 ' + fmtDistance(Math.hypot(rocket.x-planet.x, rocket.y-planet.y) - planet.radius),
+                    desc: '再按 P 可以切断',
+                });
+                unlock('chute_open');
+            } else if (chuteState === 'open') {
+                chuteState = 'cut';
+                chuteCutFlash = 1.2;
+                toastQueue.push({
+                    title: '降 落 伞 切 断',
+                    name: '伞飘走了',
+                    desc: '降落回地面后可以重新包伞',
+                });
+            } else {
+                // 'cut' 状态：只有落地才能重新包
+                if (rocket.landed) {
+                    chuteState = 'packed';
+                    toastQueue.push({ title: '重 新 包 伞', name: '降落伞已折好', desc: '按 P 可以再次展开' });
+                } else {
+                    toastQueue.push({ title: '伞 已 切 断', name: '在空中没法重新包', desc: '落地后会自动重新包好' });
+                }
+            }
+        }
+
         // ==================== 着陆姿态 ====================
         // 机头偏离「星球正上方」的角度（度）
         //   0   = 完全竖直（正常着陆）
@@ -1283,6 +1320,26 @@
         // 效果：低空有温和刹车，高速再入会被大气明显减速；
         //       高空（>100 km）阻力快速消失，正常入轨不受影响。
         const DRAG_COEF = 2.6e-6;
+
+        // ==================== 降落伞 ====================
+        // 三种状态：
+        //   'packed'  —— 包好的，随时能展开
+        //   'open'    —— 已展开，正在减速
+        //   'cut'     —— 已切断，飘走了，落地才能重新包
+        //
+        // 减速量 = 伞面积 x 大气密度 x 速度²  （实时算，和空气阻力同一套公式）
+        //   —— 所以伞在高空几乎没用，越往下越有效，落地前一瞬间减速最猛
+        const CHUTE_AREA = 1400;          // 等效阻力面积（相当于几十平米的大伞）
+        const CHUTE_MIN_DENSITY = 0.004;  // 密度低于 0.4% 时伞基本没用
+
+        let chuteState = 'packed';
+        let chuteDragNow = 0;             // 当前这一帧伞产生的减速度（给 HUD / 渲染用）
+        let chuteCutFlash = 0;            // 切断后的短暂闪烁计时
+
+        // 船上有没有降落伞（决定 P 键有没有意义）
+        function hasChute() {
+            return shipDef.parts.some(p => p.type === 'chute' && !destroyed.has(p.id));
+        }
         const REENTRY_SPEED = 800;          // 超过这个速度（m/s）冲进大气就开始发光
 
         function atmoThickness() { return planet.radius * ATMO_RATIO; }
@@ -1409,6 +1466,19 @@
         function myAtmosphere() {
             return atmosphereDensity(rocket.x, rocket.y);
         }
+        // HUD 上那行降落伞状态
+        function chuteHudLine() {
+            if (!hasChute()) return '无伞';
+            if (chuteState === 'packed') return '伞: 包好(P)';
+            if (chuteState === 'cut') return '伞: 已切断';
+            // 展开状态：显示当前减速度
+            const dens = atmosphereDensity(rocket.x, rocket.y);
+            if (dens < CHUTE_MIN_DENSITY) return '伞: 展开(无大气,无效)';
+            const g = SURFACE_GRAVITY_MS2 / M_PER_PX;
+            const ratio = chuteDragNow / Math.max(1e-9, g);
+            return '伞: 展开 ' + ratio.toFixed(1) + 'x重力';
+        }
+
         // HUD 上那行再入温度提示
         function heatLine() {
             const h = hottestPart();
@@ -2058,6 +2128,7 @@
             if (e.code === 'Period') { cycleTimeScale(1); return; }
             if (e.code === 'KeyT') { toggleTouchPanel(); return; }
             if (e.repeat) return;   // 长按不重复触发下面这些，避免状态乱闪
+            if (e.code === 'KeyP') { toggleChute(); return; }
             if (e.code === 'KeyE') toggleEngine();
             if (e.code === 'KeyS') saveGame();
             if (e.code === 'KeyL') loadGame();
@@ -2332,6 +2403,7 @@
             // ---- 空气阻力：只在大气层内有效，速度越快、密度越大，减速越狠 ----
             const dens = atmosphereDensity(rocket.x, rocket.y);
             let heating = 0;
+            chuteDragNow = 0;
             if (dens > 0) {
                 const sp = Math.hypot(rocket.vx, rocket.vy);
                 if (sp > 1) {
@@ -2340,6 +2412,16 @@
                     const drag = DRAG_COEF * dens * sp * sp;
                     rocket.vx -= (rocket.vx / sp) * drag * dt;
                     rocket.vy -= (rocket.vy / sp) * drag * dt;
+
+                    // ---- 降落伞：实时按「伞面积 x 大气密度 x 速度²」减速 ----
+                    // 和空气阻力同一套公式，只是等效面积大得多。
+                    // 高空密度低 -> 几乎没用；越往下越猛 -> 和真实降落伞一样。
+                    if (chuteState === 'open' && dens > CHUTE_MIN_DENSITY) {
+                        const chuteDrag = DRAG_COEF * CHUTE_AREA * dens * sp * sp;
+                        chuteDragNow = chuteDrag;
+                        rocket.vx -= (rocket.vx / sp) * chuteDrag * dt;
+                        rocket.vy -= (rocket.vy / sp) * chuteDrag * dt;
+                    }
                 }
                 // 再入加热：高速冲进稠密大气
                 if (sp > REENTRY_SPEED) {
@@ -2485,6 +2567,19 @@
                                 } else {
                                     rocket.landed = true;
                                     if (rocket.state === 'firing') rocket.state = 'idle';
+
+                                    // 落地后重新包伞（切断的伞也能折回来）
+                                    if (chuteState !== 'packed') {
+                                        const wasCut = chuteState === 'cut';
+                                        chuteState = 'packed';
+                                        if (wasCut) {
+                                            toastQueue.push({
+                                                title: '降 落 伞 已 重 新 包 好',
+                                                name: '按 P 可以再次展开',
+                                                desc: '',
+                                            });
+                                        }
+                                    }
                                 }
                                 if (!rocket._tiltNotified || Date.now() - rocket._tiltNotified > 4000) {
                                     rocket._tiltNotified = Date.now();
@@ -2498,6 +2593,19 @@
                                 // 正常着陆（倾角 <= 55°）
                                 rocket.landed = true;
                                 if (rocket.state === 'firing') rocket.state = 'idle';
+
+                                // 落地后重新包伞（切断的伞也能折回来）
+                                if (chuteState !== 'packed') {
+                                    const wasCut = chuteState === 'cut';
+                                    chuteState = 'packed';
+                                    if (wasCut) {
+                                        toastQueue.push({
+                                            title: '降 落 伞 已 重 新 包 好',
+                                            name: '按 P 可以再次展开',
+                                            desc: '',
+                                        });
+                                    }
+                                }
                         
                                 // ---- 着陆成就（倾角越大越严格）----
                                 if (tilt < 30) {
@@ -2733,6 +2841,83 @@
                     c.fill();
                 }
             }
+        }
+
+        // ==================== 画降落伞 ====================
+        // 伞面永远朝「速度的反方向」张开（也就是迎风面）——
+        // 这样飞船往哪掉，伞就撑在哪边，和真实降落伞一样。
+        // 展开程度随大气密度变化：密度低时伞瘪瘪的，越往下鼓得越圆。
+        function drawChute(c, vx, vy, dens) {
+            if (chuteState !== 'open') return;
+            const sp = Math.hypot(vx, vy);
+            if (sp < 0.5) return;   // 几乎静止时不画（避免抖动）
+
+            // 气流方向（速度反方向 = 伞要找的方向）
+            const ux = vx / sp, uy = vy / sp;
+
+            // 伞的“饱满程度”：密度越高越鼓，1.0 = 全开
+            const fill = Math.max(0, Math.min(1, dens / 0.25));   // 25% 密度以上全鼓
+            const spinNow = 0.35 + fill * 0.65;
+
+            // 伞绳长度随船体尺寸走
+            const ropeLen = Math.max(SPEC.width, SPEC.height) * 0.9;
+            // 伞面半径
+            const radius = Math.max(SPEC.width, SPEC.height) * (0.9 + fill * 0.9);
+
+            // 伞心位置：在船体的「上方」（也就是速度反方向）
+            const cx = -ux * (ropeLen + radius * 0.25);
+            const cy = -uy * (ropeLen + radius * 0.25);
+
+            c.save();
+
+            // ---- 伞绳：从船体几个点连到伞心 ----
+            c.strokeStyle = 'rgba(220, 220, 220, 0.85)';
+            c.lineWidth = Math.max(0.6, 1.1);
+            c.beginPath();
+            const anchors = [
+                [-SPEC.width * 0.35, -SPEC.height * 0.3],
+                [SPEC.width * 0.35, -SPEC.height * 0.3],
+                [0, -SPEC.height * 0.45],
+            ];
+            for (const a of anchors) {
+                c.moveTo(a[0], a[1]);
+                c.lineTo(cx, cy);
+            }
+            c.stroke();
+
+            // ---- 伞面：椭圆，短轴沿速度方向（被气流压扁一点） ----
+            const ang = Math.atan2(uy, ux);      // 气流方向
+            c.translate(cx, cy);
+            c.rotate(ang);
+            // 伞面：沿气流方向压扁到 0.72，垂直方向保持 1.0
+            c.scale(0.72, 1.0);
+
+            c.beginPath();
+            c.arc(0, 0, radius * spinNow, 0, Math.PI * 2);
+            // 橙色伞布 + 深浅条纹
+            const grad = c.createLinearGradient(-radius, -radius, radius, radius);
+            grad.addColorStop(0, '#ffb35c');
+            grad.addColorStop(0.5, '#ff8f2e');
+            grad.addColorStop(1, '#e07018');
+            c.fillStyle = grad;
+            c.fill();
+            c.strokeStyle = '#a8541a';
+            c.lineWidth = Math.max(1, radius * 0.055);
+            c.stroke();
+
+            // 几条深色分割线（让伞看起来有褶皱）
+            c.strokeStyle = 'rgba(150, 70, 20, 0.55)';
+            c.lineWidth = Math.max(0.6, radius * 0.035);
+            for (let k = -2; k <= 2; k++) {
+                const yy = k * radius * 0.38 * spinNow;
+                const half = Math.sqrt(Math.max(0, (radius*spinNow)**2 - yy*yy));
+                c.beginPath();
+                c.moveTo(-half, yy);
+                c.lineTo(half, yy);
+                c.stroke();
+            }
+
+            c.restore();
         }
 
         function shipRoundRect(c, x, y, w, h, r) {
@@ -3006,6 +3191,9 @@
             ctx.translate(-SPEC.com.x, -SPEC.com.y);
             drawShip(ctx, rocket.state === 'firing' && rocket.fuel > 0, performance.now());
 
+            // ---- 降落伞（画在飞船之上，伞面朝速度反方向）----
+            drawChute(ctx, rocket.vx, rocket.vy, atmosphereDensity(rocket.x, rocket.y));
+
             // ---- 再入加热：高速冲进大气时，船体外面裹一层火光 ----
             const heat = rocket.heat || 0;
             if (heat > 0.01) {
@@ -3139,7 +3327,7 @@
                 `高度: ${fmtDistance(surfaceDist)} | ${atmoStatusText()}${heatLine()}\n` +
                 orbitLine + '\n' +
                 `圆轨道速度: ${fmtSpeed(vCirc)} | 逃逸速度: ${fmtSpeed(vEsc)}` + orbitHint + '\n' +
-                `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m | 质量: ${shipMass(rocket.fuel).toFixed(0)} 单位` + '\n' +
+                `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m | 质量: ${shipMass(rocket.fuel).toFixed(0)} 单位 | ${chuteHudLine()}` + '\n' +
                 `已绕: ${stats.orbits} 圈 | 成就: ${achieved.size} / ${achievements.length}（按 C 查看） | 音乐: ${bgmMuted ? '关' : '开'}` + '\n' +
                 coopLine();
 
