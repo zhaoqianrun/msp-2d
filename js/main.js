@@ -66,6 +66,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         let lastCtrlPollAt = 0;
         let lastStatePollAt = 0;
         let lastRecvAt = 0;
+        let lastWorldRev = -1;      // 已拿到的世界版本：>0 后走 since 增量，省流量
 
         // 观战端用：服务器状态 + 插值
         let remotePrev = null;
@@ -141,8 +142,9 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (now - lastStatePollAt < POLL_INTERVAL_MS) return;
             lastStatePollAt = now;
             try {
-                const r = await fetch(apiUrl("/api/state?since=0"));
+                const r = await fetch(apiUrl("/api/state" + (lastWorldRev >= 0 ? "?since=" + lastWorldRev : "")));
                 const d = await r.json();
+                if (d && typeof d.rev === 'number') lastWorldRev = d.rev;
                 if (d && d.changed && d.world) {
                     // 忽略和本端比例不一致的旧世界：
                     // 如果操控端还是旧版本（星球半径 50000 等），照搬过来会把画面缩小几十倍。
@@ -1328,6 +1330,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             // 缩放：[ 缩小、] 放大（按住会持续缩放）
             if (e.code === 'BracketLeft') { keys.zoomOut = true; return; }
             if (e.code === 'BracketRight') { keys.zoomIn = true; return; }
+            if (e.repeat) return;   // 单次动作键不吃键盘自动重复：长按 . 不该连跳几十档
             if (e.code === 'KeyC') { toggleAchievementPanel(); return; }
             if (e.code === 'KeyM') { toggleBgm(); return; }
             if (e.code === 'KeyR') { respawnOnGround(); return; }
@@ -1335,7 +1338,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (e.code === 'Comma') { cycleTimeScale(-1); return; }
             if (e.code === 'Period') { cycleTimeScale(1); return; }
             if (e.code === 'KeyT') { toggleTouchPanel(); return; }
-            if (e.repeat) return;   // 长按不重复触发下面这些，避免状态乱闪
             if (e.code === 'KeyE') toggleEngine();
             if (e.code === 'KeyS') saveGame();
             if (e.code === 'KeyL') loadGame();
@@ -1588,8 +1590,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     fuelMsgTimer = 2;
                 }
             }
-            if (fuelMsgTimer > 0) fuelMsgTimer -= dt;
-
             // 引力
             const g = gravityAt(rocket.x, rocket.y);
             rocket.vx += g.ax * dt;
@@ -1784,9 +1784,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             mainView._impactCooldown = Math.max(0, mainView._impactCooldown - dt);
             if (impactCooldown > 0) impactCooldown -= dt;
 
-            // 成就检查 + 弹出横幅
+            // 成就检查（横幅计时已移到渲染循环：用真实时间，不受时间倍率影响）
             checkAchievements(dt);
-            updateAchievementToast(dt);
         }
 
         // ==== 轨道预测线（虚线）====
@@ -2093,6 +2092,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             const frameTime = (now - lastTime) / 1000;
             lastTime = now;
 
+            // 横幅/提示计时走真实时间：100x 加速下提示不该一闪而过
+            updateAchievementToast(frameTime);
+            if (fuelMsgTimer > 0) fuelMsgTimer -= frameTime;
+
             if (isSpectator()) {
                 // 观战端：不跑物理，只把操控端的状态插值渲染出来
                 applyRemoteWorld();
@@ -2114,12 +2117,14 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             }
 
             // 和服务器同步：操控端上报，观战端拉取
-            if (netMode || !netMode) { sendState(); fetchState(); }
+            if (netMode) { sendState(); fetchState(); }
 
             // 相机对准质心 —— 原点在船底，直接跟原点的话大船会偏在屏幕下方看不全
             const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
-            camera.x += (camPt.x - camera.x) * 0.15;
-            camera.y += (camPt.y - camera.y) * 0.15;
+            // 跟随系数按真实帧时长换算：旧实现固定 0.15/帧，144Hz 跟太紧、掉帧又太松
+            const camFollow = 1 - Math.exp(-9.75 * Math.min(frameTime, 0.25));
+            camera.x += (camPt.x - camera.x) * camFollow;
+            camera.y += (camPt.y - camera.y) * camFollow;
 
             ctx.fillStyle = '#050510';
             ctx.fillRect(0, 0, canvasW, canvasH);
@@ -2526,7 +2531,15 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     Object.assign(rocket, data.rocket);
                     // 星球参数只信代码里的：旧存档里的半径是旧比例（50000 / 20000），
                     // 一旦覆盖会把整个世界缩小几十倍，位置也全乱。所以不读存档的 planet。
-                    if (data.camera) Object.assign(camera, data.camera);
+                    // 相机只取 x/y/zoom：旧存档的 minZoom/maxZoom 会悄悄改掉当前
+                    // 缩放边界（实测旧档 minZoom 0.0008，代码 0.0001，缩野缩水 8 倍）
+                    if (data.camera && typeof data.camera === 'object') {
+                        if (Number.isFinite(data.camera.x)) camera.x = data.camera.x;
+                        if (Number.isFinite(data.camera.y)) camera.y = data.camera.y;
+                        if (Number.isFinite(data.camera.zoom)) {
+                            camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, data.camera.zoom));
+                        }
+                    }
                     // 老存档里可能带着旧的引力字段（gravity / surfaceGravity）。
                     // 这些字段已经废弃，而且**必须删掉** —— 留着会覆盖掉新的
                     // 单一数据源，又把单位混用的 bug 带回来。
