@@ -708,6 +708,33 @@ test('[多船] 带伤分离：血量从主船表切过去，不再满血复活',
     resetToGround();
 });
 
+test('[多船] 新发射归档：换船不覆盖旧船，两船可切换', () => {
+    resetToGround();
+    // 当前船（默认船）归档 → 换一艘新船 → 旧船应还在世界里且可接管
+    const oldPos = { x: t.rocket.x, y: t.rocket.y };
+    assert(t.archiveCurrentShip() === true, '归档应成功');
+    const oldShip = t.vessels.find(v => v.id !== 'v0');
+    assert(!!oldShip, '旧船应在世界里');
+    near(oldShip.x, oldPos.x, 1e-6, '旧船原位保留 X');
+    assert(oldShip.def.name === '默认船', '旧船应带上名字');
+    // 换新船（带发射台偏移验证：旧船停在发射台，新船应挪开）
+    t.setShipDef({ version: 1, name: '新船', parts: [
+        { id: 'n1', type: 'capsule', x: 0, y: 0 },
+        { id: 'n2', type: 'engine',  x: 0, y: 2 },
+    ]}, { offsetDeg: 12 });
+    assert(t.shipDef.name === '新船', '新船应生效');
+    near(t.rocket.angle, 102, 1e-6, '发射台被占：新船应沿表面偏移 12°');
+    const alt = Math.hypot(t.rocket.x - planet.x, t.rocket.y - planet.y) - planet.radius;
+    assert(alt > 0 && alt < 30, '新船应贴地（锚点在最低角上方一点）, alt=' + alt.toFixed(1));
+    // 两船都有控制舱 → V 键可切回旧船
+    const before = { x: t.rocket.x, y: t.rocket.y };
+    t.cycleVessel();
+    near(t.rocket.x, oldPos.x, 1e-6, 'V 键切回旧船');
+    const back = t.vessels.find(v => v.id !== 'v0');
+    assert(back.def.name === '新船', '切走的新船也应留在世界里');
+    resetToGround();
+});
+
 // ============================================================
 
 console.log('\n==========================================');

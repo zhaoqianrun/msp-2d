@@ -71,6 +71,7 @@ export function installBrowserStubs() {
 
     globalThis.window = win;
     globalThis.document = documentStub;
+    globalThis.location = { search: '', port: '' };   // main.js 顶层会读 location.search
     globalThis.localStorage = {
         getItem: (k) => (store.has(k) ? store.get(k) : null),
         setItem: (k, v) => { store.set(k, String(v)); },

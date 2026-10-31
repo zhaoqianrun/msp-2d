@@ -47,7 +47,9 @@ docs/SMOKE-TEST.md  手测冒烟清单（10 条）
 gameLoop（每帧，真实时间）
  ├─ updateAchievementToast(frameTime)   ← UI 计时用真实时间，不随时间倍率缩放
  ├─ 操控端: 累加器 × timeScale → physicsStep(FIXED_DT) × N（每帧上限 260 步）
- │    physicsStep: 输入(真实时间)→引力→发动机(检查发动机/油箱存活)→阻力→位移→着陆/损毁/分离→残骸→加热→成就
+ │    physicsStep: 输入(真实时间)→引力→发动机(检查发动机/油箱存活)→阻力→位移
+ │      →着陆(姿态/弹跳)→损毁/分离→残骸(自旋)→船-船碰撞→加热→成就
+ │    多飞船：activateVessel 切换操控（V 键），新发射归档旧船（上限 8 艘）
  ├─ 观战端: applyRemoteWorld() 插值服务器状态
  ├─ 渲染插值: 步进前后各快照一次状态，渲染按 alpha=累加器余量/步长 取插值位置
  │    （物理 60Hz 固定步进，高刷屏 240Hz 下不插值会 4 帧一跳——Fix Your Timestep）

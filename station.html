@@ -267,14 +267,16 @@ function render() {
             body = '<div><span class="k">状态</span>本地存档（服务器未运行，看不到实时位置）</div>';
         }
 
-        // 按钮说实话：接管残骸的功能还没实装（play-main 不读 ?vessel= 参数），
-        // 与其放一个点开发现进的还是主船的按钮，不如明确告诉玩家暂不支持
-        const canEnter = !it.offline && it.hasCapsule && !it.derelict && !allDead;
+        // 带控制舱的船都可以接管（含断成两截后带舱的那截）——
+        // 通过 ?vessel=<id> 让 play-main 载入后直接切换到该船
+        const canEnter = !it.offline && it.hasCapsule && !allDead;
         const act = it.offline
             ? '<button class="tbtn" onclick="location.href=\'build.html\'">去造船厂</button>'
             : (canEnter
-                ? `<button class="tbtn go" onclick="enterVessel(${idx})">进入并操控</button>`
-                : '<button class="tbtn" disabled style="opacity:.45;cursor:not-allowed" title="接管残骸暂未实装，游戏目前只能操控带控制舱的主船">暂不能接管</button>');
+                ? (it.vesselId
+                    ? `<button class="tbtn go" onclick="enterVessel('${it.vesselId}')">进入并操控</button>`
+                    : '<button class="tbtn go" onclick="location.href='play-main.html'">进入并操控</button>')
+                : '<button class="tbtn" disabled style="opacity:.45;cursor:not-allowed" title="这艘船没有能用的控制舱，无法接管">暂不能接管</button>');
 
         return `<div class="vessel ${it.derelict ? 'derelict' : ''} ${it.main ? 'active' : ''}">
             <div class="vhead">
@@ -288,9 +290,9 @@ function render() {
     }).join('');
 }
 
-function enterVessel(idx) {
-    // 进入游戏。有控制舱的能操控，没有的进去也只能看
-    location.href = 'play-main.html?vessel=' + idx;
+function enterVessel(id) {
+    // 进入游戏并直接接管 ?vessel=<id> 对应的航天器
+    location.href = 'play-main.html?vessel=' + encodeURIComponent(id);
 }
 
 poll();

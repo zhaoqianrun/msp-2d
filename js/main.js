@@ -122,6 +122,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 hasCapsule: hasWorkingCapsule(),
                 parts: shipDef.parts.map(p => ({ type: p.type, alive: !destroyed.has(p.id) })),
                 derelicts: vessels.filter(v => v.id !== activeVesselId).map(v => ({
+                    id: v.id,
+                    name: v.def.name || ('残骸 ' + v.id),
                     x: v.x, y: v.y, vx: v.vx, vy: v.vy, angle: v.angle,
                     fuel: v.fuel, landed: v.landed,
                     parts: v.def.parts.map(p => ({ type: p.type, alive: !v.destroyed.has(p.id) })),
@@ -467,9 +469,18 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // 把飞船放到「碰撞箱最深点正好贴在地表」的位置。
         // 不能简单写 planet.radius —— rocket.y 是船体本地原点，
         // 最深的碰撞点可能在原点下方（取决于你拼的船形）。
-        function placeOnSurface() {
+        function placeOnSurface(offsetDeg) {
             rocket.x = planet.x;
             rocket.y = planet.y - planet.radius;
+            if (offsetDeg) {
+                // 发射台被占：位置绕球心旋转挪开，机头保持垂直于当地表面
+                const rad = offsetDeg * Math.PI / 180;
+                const cosO = Math.cos(rad), sinO = Math.sin(rad);
+                const rx = rocket.x - planet.x, ry = rocket.y - planet.y;
+                rocket.x = planet.x + rx * cosO - ry * sinO;
+                rocket.y = planet.y + rx * sinO + ry * cosO;
+                rocket.angle = ((rocket.angle + offsetDeg) % 360 + 360) % 360;
+            }
             for (let i = 0; i < 8; i++) {
                 const hit = lowestCollisionPoint(rocket.angle);
                 if (!hit || hit.dist <= 0) break;
@@ -1124,7 +1135,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // shipDef / SPEC / 血量表 / 温度表 / 已毁集合 / 撞击配额 要一起重建。
         // 少换任何一个，就会出现「旧船碰撞箱 + 新船部件」的缝合船：
         // 部件血量查不到 id 变 NaN（撞击永远免疫）、渲染错位、质心错、开局即毁。
-        function setShipDef(def) {
+        function setShipDef(def, opts) {
             shipDef = def;
             pristineShip = JSON.parse(JSON.stringify(def));   // 重置（R）时回到这艘
             SPEC = shipSpec(shipDef);
@@ -1137,9 +1148,45 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             lastComFuel = -1;   // 换船后质心必须重算
             rocket.throttle = 1;
             rocket.state = 'idle';
-            placeOnSurface();
+            rocket.angle = 90;   // 新发射的船竖直立在发射台（别继承上一艘的姿态）
+            placeOnSurface(opts && opts.offsetDeg);
             resetInterp();
             chuteState = 'packed';   // 新船的伞是包好的
+        }
+
+        // ==================== 多船共存：旧船归档 ====================
+        // 换船发射时不再覆盖旧船 —— 把当前主船整体物化成世界里的一艘
+        // 可接管船（原位保留：在飞就继续飞，着陆就停在原地）。
+        const SHIP_CAP = 8;   // 世界并存船只上限（含当前操控的）
+        function archiveCurrentShip() {
+            const others = vessels.filter(v => v.id !== activeVesselId);
+            if (others.length >= SHIP_CAP - 1) {
+                const retired = others.find(v => v.landed) || others[0];
+                if (!retired) return false;
+                vessels = vessels.filter(v => v !== retired);
+                toastQueue.push({
+                    title: '船 舶 退 役',
+                    name: (retired.def.name || '最老的一艘船') + ' 已移出世界',
+                    desc: '世界最多保留 ' + SHIP_CAP + ' 艘船',
+                });
+            }
+            const old = makeVessel(shipDef.parts, rocket.x, rocket.y,
+                                   rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
+            old.hp = partHP;
+            old.temp = partTemp;
+            old.dead = destroyed;
+            old.def = shipDef;
+            old.spec = SPEC;
+            old.def.name = shipDef.name || '旧船';
+            old.throttle = rocket.throttle;
+            old.state = rocket.state === 'firing' ? 'idle' : rocket.state;
+            old.landed = rocket.landed;
+            old.heat = rocket.heat || 0;
+            old._impactCooldown = 0;
+            old._impactBudget = {};
+            const idx = vessels.indexOf(mainView);
+            if (idx >= 0) vessels[idx] = old; else vessels.push(old);
+            return true;
         }
 
         // ==================== 本局任务自动存档 ====================
@@ -2930,6 +2977,18 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             camera.x = camPt.x; camera.y = camPt.y;
         }
         resetInterp();   // 开局初始化插值状态（无论是否从任务档恢复）
+
+        // 观察站「进入并操控」：?vessel=<id> 载入后接管指定航天器
+        try {
+            const urlVessel = new URLSearchParams(location.search).get('vessel');
+            if (urlVessel && urlVessel !== activeVesselId && !activateVessel(urlVessel)) {
+                toastQueue.push({
+                    title: '接 管 失 败',
+                    name: '目标航天器不在世界里',
+                    desc: '回到观察站刷新后再试',
+                });
+            }
+        } catch (e) { /* 无 location（如无头测试）就跳过 */ }
         setInterval(pollControl, CTRL_INTERVAL_MS);
 
         // 如果服务器上有造船厂存的飞船，就用它（手机造的船电脑也能飞）
@@ -2951,11 +3010,18 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 // 这一局若是从任务存档恢复的，而且服务器上的船和它是同一艘，
                 // 就**不要**用完好的船去覆盖当前这艘 —— 否则刚恢复的损毁状态又被抹平了。
                 if (missionRestored && shipPartsSig(parts) === missionSig) return;
+                // —— 多船共存：换船发射不再覆盖旧船 ——
+                // 当前船若还活着，整体归档为世界里可接管的船（原位保留）。
+                if (alivePartCount() > 0 && !archiveCurrentShip()) return;
                 // 换了一艘船（或在造船厂造了新的搭配）—— 旧任务作废
                 clearMission();
                 // 走唯一入口换船：SPEC / 血量表 / 温度表 / 已毁集合全部按新船重建，
                 // 再把新船摆回地面。（以前只换了 shipDef，SPEC 还是旧船的 —— 缝合船。）
-                setShipDef({ version: 1, name: d.ship.name || '无名', parts });
+                // 发射台被占（旧船停在那）就沿表面挪一个身位
+                const padBusy = vessels.some(v => v.id !== activeVesselId && v.landed &&
+                    Math.hypot(v.x - planet.x, v.y - (planet.y - planet.radius)) < 500);
+                setShipDef({ version: 1, name: d.ship.name || '无名', parts },
+                           { offsetDeg: padBusy ? 12 : 0 });
                 try { localStorage.setItem('msp2d-ship', JSON.stringify(shipDef)); } catch (e) {}
                 toastQueue.push({
                     name: shipDef.name,
@@ -3090,6 +3156,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
             onKeyDown, blowUpPart, predictPath, rocketRenderPos, resetInterp,
             toggleChute, hasChute, shipTiltDeg, sanitizeShipDef, activateVessel, cycleVessel, vesselHasCapsule,
+            archiveCurrentShip,
             get chuteState() { return chuteState; },
             set chuteState(v) { chuteState = v; },   // 测试直接设伞状态
             get chuteDragNow() { return chuteDragNow; },

@@ -5,9 +5,9 @@
 
 ## 功能缺口
 
-1. **观察站接管残骸未实装**：station.html 的残骸卡片现在是禁用态按钮
-   「暂不能接管」。根因：游戏的操控模型绑死在主船（mainView ↔ rocket），
-   切换操控对象需要先把游戏状态收敛成实体列表（见 ARCHITECTURE「边界」）。
+1. ✅ **观察站接管残骸已实装**（2026-11-01）：activateVessel + V 键循环切换 +
+   观察站 ?vessel=<id> 直达接管；新发射的船归档为可接管船而非覆盖旧船
+   （上限 8 艘，超限退役最老着陆船）。仍在：残骸不带控制舱时不可接管。
 2. **build/station 仍有 PART_TYPES 副本**：部件数值改了要三处同步
    （`js/ship/partTypes.js`、`build.html`、`station.html`）。
    收敛方案：两个页面也改成 `<script type="module">` import 同一份。
