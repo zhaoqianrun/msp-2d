@@ -911,19 +911,20 @@
         //   燃料质量 = Σ 燃料箱容量
         //   总推力   = Σ 发动机推力
         // 燃料烧掉多少，质量就减轻多少 —— 这就是「燃料减少，重量也减少」。
-        let SPEC = shipSpec(shipDef);   // 分离后要重算，所以是 let
-        const DRY_MASS = SPEC.dryMass;
-        const FUEL_MASS = SPEC.fuelCap;
-        const FULL_THRUST = SPEC.thrust;
+        let SPEC = shipSpec(shipDef);   // 分离/换船后要重算，所以是 let
 
+        // 质量/推力永远按「现在还活着的部件」实时算（shipInfo 有缓存，开销可忽略）。
+        // 以前这里用页面加载时冻结的 DRY_MASS / FUEL_MASS / FULL_THRUST 三个 const：
+        // 发动机烧毁、撞毁、随断船分离之后，飞船照样有满推力、质量也不变 —— 已废除。
         function shipMass(fuel) {
-            return DRY_MASS + FUEL_MASS * Math.max(0, Math.min(1, fuel));
+            const info = shipInfo();
+            return info.dryMass + info.fuelCap * Math.max(0, Math.min(1, fuel));
         }
 
         // 当前实际加速度（已经算上油门和质量）
         function thrustAccel(fuel, throttle) {
             const m = shipMass(fuel);
-            return m > 0 ? FULL_THRUST * throttle / m : 0;
+            return m > 0 ? shipInfo().thrust * Math.max(0, Math.min(1, throttle)) / m : 0;
         }
 
         let fuelMsgTimer = 0;           // 在空中按 +/- 时的提示，显示 2 秒
@@ -1511,6 +1512,7 @@
         }
 
         let wreckedCount = 0;         // 这一趟撞炸了几个部件
+        let shipTotalLoss = false;    // 是否已经弹过「任务失败」（全毁只弹一次）
         let debris = [];              // 爆炸碎片（纯视觉）
 
         // 给每个部件建一份耐久表（和 shipDef.parts 一一对应）
@@ -2166,17 +2168,27 @@
         function toggleEngine() {
             if (rocket.state === 'firing') {
                 rocket.state = 'idle';        // 关机
-            } else {
-                if (rocket.landed) {
-                    unlock('first_flight');
-                    stats.launchX = rocket.x; // 记下起飞点，着陆时用来算飞了多远
-                    stats.launchY = rocket.y;
-                    stats.escaped = false;    // “迷路的猫”只算同一次飞行：逃逸了又自己回来
-                    resetImpactBudget();      // 新的一趟，重新计算能承受的撞击
-                }
-                rocket.state = 'firing';      // 点火；停在星球上按就是重新起飞
-                rocket.landed = false;
+                return;
             }
+            if (!hasWorkingEngine()) {
+                // 点火入口必须拦住死发动机：以前只有「撞击路径」会熄火，
+                // 烧毁和分离路径都能让已经不存在的发动机满推力复活。
+                toastQueue.push({
+                    title: '无 法 点 火',
+                    name: '没有能用的发动机',
+                    desc: '发动机已被毁坏或随断船分离，按 R 修复飞船重新开始',
+                });
+                return;
+            }
+            if (rocket.landed) {
+                unlock('first_flight');
+                stats.launchX = rocket.x; // 记下起飞点，着陆时用来算飞了多远
+                stats.launchY = rocket.y;
+                stats.escaped = false;    // “迷路的猫”只算同一次飞行：逃逸了又自己回来
+                resetImpactBudget();      // 新的一趟，重新计算能承受的撞击
+            }
+            rocket.state = 'firing';      // 点火；停在星球上按就是重新起飞
+            rocket.landed = false;
         }
 
         // ==== 缩放（滚轮，或键盘 - / =）====
@@ -2264,13 +2276,34 @@
 
         // ==== 物理更新 ====
         function physicsStep(dt) {
+            // ==== 全毁锁定 ====
+            // 一个活部件都不剩：船已是空壳。熄火、锁死全部操控，弹一次「任务失败」，
+            // 按 R 修复重开。以前这里什么都不做 —— 玩家会开着一艘画不出来的
+            // 「隐形船」继续飞、继续存档。
+            const shipAlive = alivePartCount() > 0;
+            if (shipAlive) {
+                shipTotalLoss = false;
+            } else {
+                rocket.state = 'idle';
+                rocket.throttle = 0;
+                if (!shipTotalLoss) {
+                    shipTotalLoss = true;
+                    settleMission();   // 这一趟攒下的成就当场结算
+                    toastQueue.push({
+                        title: '任 务 失 败',
+                        name: '航天器已完全损毁',
+                        desc: '按 R 修复飞船重新开始',
+                    });
+                }
+            }
+
             // 旋转放在最前面：停在地上也能先转好方向，再点火起飞
-            if (keys.left) rocket.angle -= ROTATE_SPEED * dt;
-            if (keys.right) rocket.angle += ROTATE_SPEED * dt;
+            if (shipAlive && keys.left) rocket.angle -= ROTATE_SPEED * dt;
+            if (shipAlive && keys.right) rocket.angle += ROTATE_SPEED * dt;
             rocket.angle = ((rocket.angle % 360) + 360) % 360;
 
             // 缩放：按住 [ / ] 持续缩放（和滚轮、双指捏合同一个 zoomBy）
-            if (keys.zoomIn || keys.zoomOut) {
+            if (shipAlive && (keys.zoomIn || keys.zoomOut)) {
                 const zoomFactor = Math.pow(1 + ZOOM_RATE_PER_SEC, dt);
                 if (keys.zoomIn) zoomBy(zoomFactor);
                 if (keys.zoomOut) zoomBy(1 / zoomFactor);
@@ -2278,12 +2311,12 @@
 
             // 节流阀：按住 ↑/↓ 调油门，按住 Shift 变成微调
             const rate = keys.fine ? THROTTLE_FINE_RATE : THROTTLE_RATE;
-            if (keys.throttleUp) rocket.throttle = Math.min(1, rocket.throttle + rate * dt);
-            if (keys.throttleDown) rocket.throttle = Math.max(0, rocket.throttle - rate * dt);
-            if (keys.fine && (keys.throttleUp || keys.throttleDown)) unlock('fine_tune');
+            if (shipAlive && keys.throttleUp) rocket.throttle = Math.min(1, rocket.throttle + rate * dt);
+            if (shipAlive && keys.throttleDown) rocket.throttle = Math.max(0, rocket.throttle - rate * dt);
+            if (shipAlive && keys.fine && (keys.throttleUp || keys.throttleDown)) unlock('fine_tune');
 
             // 加油 / 卸油：只能停在星球上的时候做（在空中按只会提醒你）
-            if (keys.refuel || keys.dump) {
+            if (shipAlive && (keys.refuel || keys.dump)) {
                 if (rocket.landed) {
                     if (keys.refuel) {
                         rocket.fuel = Math.min(1, rocket.fuel + FUEL_FILL_RATE * dt);
@@ -2310,7 +2343,10 @@
             // 发动机烧燃料：油门越大烧得越快；燃料烧完就自动熄火
             let thrusting = false;
             if (rocket.state === 'firing' && rocket.throttle > 0) {
-                if (rocket.fuel > 0) {
+                if (!hasWorkingEngine() || shipInfo().fuelCap <= 0) {
+                    // 发动机已烧毁/撞毁/随断船分离，或油箱全毁：想飞也飞不起来
+                    rocket.state = 'idle';
+                } else if (rocket.fuel > 0) {
                     thrusting = true;
                     rocket.fuel = Math.max(0, rocket.fuel - rocket.throttle * dt / FUEL_BURN_SECONDS);
                     if (rocket.fuel <= 0) {
@@ -3018,6 +3054,7 @@
             else if (Math.abs(speedNum - vCirc) < vTol) orbitHint = '  ← 差不多是圆轨道了！';
             let statusText = rocket.landed ? '已着陆（按 E 起飞）' : '关机';
             if (rocket.state === 'firing') statusText = '点火中';
+            if (alivePartCount() === 0) statusText = '已完全损毁（按 R 重开）';
 
             // 观战端显示角标
             const badge = document.getElementById('spectator-badge');
@@ -3042,8 +3079,9 @@
             // （以前分母用 planet.surfaceGravity=19.6，算是算出了 0.09:1，
             //   显示「推不起来」，可实际物理余量是 88 倍，把人吓一跳。）
             const twrNow = thrustAccel(rocket.fuel, 1) / G0_PX;
-            const massTip = `质量 ${massNow.toFixed(0)}（空船 ${DRY_MASS}）· 推重比 ${twrNow.toFixed(2)}:1`
-                + (rocket.fuel < 0.999 ? `  已减重 ${(FUEL_MASS * (1 - rocket.fuel)).toFixed(0)}` : '');
+            const massInfo = shipInfo();
+            const massTip = `质量 ${massNow.toFixed(0)}（空船 ${massInfo.dryMass}）· 推重比 ${twrNow.toFixed(2)}:1`
+                + (rocket.fuel < 0.999 ? `  已减重 ${(massInfo.fuelCap * (1 - rocket.fuel)).toFixed(0)}` : '');
             fuelText.innerText =
                 `燃料 ${Math.round(rocket.fuel * 100)}% · 满油门还能烧 ${Math.round(rocket.fuel * FUEL_BURN_SECONDS)} 秒`
                 + '\n' + massTip
