@@ -14,6 +14,10 @@ export const PART_TYPES = {
     // 比例从 1px=50m 改成 1px=1m 后，引力像素加速度大了 50 倍，
     // 所以推力也要×50（20 → 1000）才能保持同样的推重比和飞行时间。
     // 注意：推力必须和 build.html / station.html / index.html 保持一致。
+    // 降落伞：只在大气层里有减速作用。游戏中按 P 展开，再按 P 切断。
+    // 切断的伞不能再展开，必须降落到地面才能重新包好。
+    chute:   { name: '降落伞', w: 2, h: 2, mass: 8, fuel: 0, thrust: 0,
+               body: '#ff9a3c', edge: '#c46a1a', accent: '#ffe0a0' },
     engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000,
                body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
 };

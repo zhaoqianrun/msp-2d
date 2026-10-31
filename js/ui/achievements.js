@@ -19,6 +19,7 @@ export const achievements = [
     { id: 'no_scratch',        name: '毫发无伤',   desc: '一次着陆，垂直速度低于 5 px/s' },
     { id: 'burned_up',         name: '火烧眉毛',   desc: '再入时部件被高温烧毁' },
     { id: 'capsule_survives',  name: '返回舱幸存', desc: '其它部件全烧光，控制舱还挺着' },
+    { id: 'chute_open',        name: '空中开花',   desc: '第一次展开降落伞' },
     { id: 'meteor',            name: '流星',       desc: '以超过 400 px/s 冲进大气层' },
     { id: 'split_vessel',      name: '断成两截',   desc: '飞船在太空中分离成多个航天器' },
     { id: 'derelict_keeper',   name: '太空垃圾场', desc: '同时存在 3 个以上航天器' },

@@ -473,6 +473,68 @@ test('[插值] 240Hz 帧节拍下渲染位置逐帧连续（旧实现 75% 帧零
     resetToGround();
 });
 
+test('[降落伞] 状态机：展开 → 切断 → 落地重包', () => {
+    t.setShipDef({ version: 1, name: '伞船', parts: [
+        { id: 'c1', type: 'capsule', x: 0, y: 0 },
+        { id: 'c2', type: 'chute',   x: 0, y: 2 },
+    ]});
+    t.resetInterp();
+    assert(t.hasChute() === true, '应有伞');
+    t.toggleChute();
+    assert(t.chuteState === 'open', 'P 后应展开');
+    t.toggleChute();
+    assert(t.chuteState === 'cut', '再按应切断');
+    t.rocket.landed = true;
+    t.toggleChute();
+    assert(t.chuteState === 'packed', '落地后按 P 应重包');
+    t.toggleChute();
+    assert(t.chuteState === 'open', '重包后可再展开');
+    // 伞毁了：hasChute 为 false，toggle 只提示不动状态
+    t.chuteState && (t.chuteState === 'open') && t.toggleChute();   // cut
+    t.destroyed.add('c2');
+    t.invalidateShipCache();
+    assert(t.hasChute() === false, '伞毁后应无伞');
+    const before = t.chuteState;
+    t.toggleChute();
+    assert(t.chuteState === before, '无伞时状态不变');
+    resetToGround();
+});
+
+test('[降落伞] 展开后减速远强于收起（10km 高、下落 800px/s）', () => {
+    const fall = (deploy) => {
+        t.setShipDef({ version: 1, name: '伞船', parts: [
+            { id: 'c1', type: 'capsule', x: 0, y: 0 },
+            { id: 'c2', type: 'chute',   x: 0, y: 2 },
+        ]});
+        t.resetInterp();
+        t.rocket.x = planet.x;
+        t.rocket.y = planet.y - (planet.radius + 10000);   // 10km 高
+        t.rocket.vx = 0;
+        t.rocket.vy = 800;                                  // 朝星球下落
+        t.rocket.landed = false;
+        t.rocket.state = 'idle';
+        t.chuteState = deploy ? 'open' : 'packed';
+        env.pumpFrames(30);                                 // 0.5 游戏秒
+        return Math.hypot(t.rocket.vx, t.rocket.vy);
+    };
+    const packed = fall(false);
+    const open = fall(true);
+    assert(packed > 750, '收伞应继续加速, speed=' + packed.toFixed(0));
+    assert(open < packed * 0.6, '开伞应大幅减速: open=' + open.toFixed(0) + ' vs packed=' + packed.toFixed(0));
+    resetToGround();
+});
+
+test('[着陆姿态] shipTiltDeg：竖直 0° / 横躺 90° / 倒扣 180°', () => {
+    resetToGround();
+    t.rocket.angle = 90;
+    near(t.shipTiltDeg(90), 0, 1e-6, '竖直');
+    t.rocket.angle = 180;
+    near(t.shipTiltDeg(180), 90, 1e-6, '横躺');
+    t.rocket.angle = 270;
+    near(t.shipTiltDeg(270), 180, 1e-6, '倒扣');
+    resetToGround();
+});
+
 // ============================================================
 
 console.log('\n==========================================');

@@ -159,6 +159,12 @@ const PART_TYPES = {
         body: '#8d99a8', edge: '#5c6874', accent: '#ff5544',
         info: '推力 1000',
     },
+    chute: {
+        // 降落伞：减速发生在游戏内（按大气密度实时算），这里只负责放置。
+        name: '降落伞', w: 2, h: 2, mass: 8, fuel: 0, thrust: 0,
+        body: '#ff9a3c', edge: '#c46a1a', accent: '#ffe0a0',
+        info: '减速伞：游戏中按 P 展开 / 切断',
+    },
 };
 
 const GRID = 20;              // 一格多少像素
