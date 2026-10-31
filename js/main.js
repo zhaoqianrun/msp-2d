@@ -1370,6 +1370,87 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             return born;
         }
 
+        // ==================== 切换操控（多飞船核心）====================
+        // 把目标航天器提升为主视图，当前主船降级为世界里可接管的船。
+        // mainView 是「模块级船位」的门面（getter 跟随模块变量）——
+        // 所以接管 = 把目标的状态换入船位，成本极低且所有 HUD/存档自动正确。
+        function activateVessel(id) {
+            if (!id || id === activeVesselId) return false;
+            const target = vessels.find(v => v.id === id);
+            if (!target) return false;
+            if (!vesselHasCapsule(target)) {
+                toastQueue.push({
+                    title: '无 法 接 管',
+                    name: '这艘船没有能用的控制舱',
+                    desc: '只有带控制舱的航天器可以操控',
+                });
+                return false;
+            }
+            // 1) 旧主船降级：把主视图当前状态物化成一个残骸对象（带伤原样带出）
+            const old = makeVessel(shipDef.parts, rocket.x, rocket.y,
+                                   rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
+            old.hp = partHP;
+            old.temp = partTemp;
+            old.dead = destroyed;
+            old.def = shipDef;
+            old.spec = SPEC;
+            old.def.name = shipDef.name || '旧船';
+            old.throttle = rocket.throttle;
+            old.state = rocket.state === 'firing' ? 'idle' : rocket.state;
+            old.landed = rocket.landed;
+            old.heat = rocket.heat || 0;
+            old._impactCooldown = 0;
+            old._impactBudget = {};
+            const idx = vessels.indexOf(mainView);
+            if (idx >= 0) vessels[idx] = old; else vessels.push(old);
+            // 2) 目标状态换入船位
+            shipDef = target.def;
+            SPEC = target.spec;
+            partHP = target.hp;
+            partTemp = target.temp;
+            destroyed = target.dead;
+            rocket.x = target.x; rocket.y = target.y;
+            rocket.vx = target.vx; rocket.vy = target.vy;
+            rocket.angle = target.angle;
+            rocket.fuel = target.fuel;
+            rocket.throttle = target.throttle;
+            rocket.state = target.state === 'firing' ? 'idle' : target.state;
+            rocket.landed = target.landed;
+            rocket.heat = target.heat || 0;
+            // 3) 目标槽位换回主视图：mainView 必须留在 vessels 里
+            //    （船-船碰撞、状态上报都遍历 vessels；invariant：列表里
+            //    恒有且仅有一个 mainView 条目，id = activeVesselId）
+            const tIdx = vessels.indexOf(target);
+            if (tIdx >= 0) vessels[tIdx] = mainView;
+            lastComFuel = -1;
+            invalidateShipCache();
+            resetImpactBudget();
+            resetInterp();
+            toastQueue.push({
+                title: '切 换 操 控',
+                name: shipDef.name || '已接管航天器',
+                desc: '按 V 可在航天器之间切换',
+            });
+            return true;
+        }
+
+        // V 键：在所有「含活着控制舱的航天器」之间循环接管
+        function cycleVessel() {
+            const curIdx = vessels.findIndex(v => v.id === activeVesselId);
+            for (let i = 1; i <= vessels.length; i++) {
+                const v = vessels[(curIdx + i) % vessels.length];
+                if (v.id !== activeVesselId && vesselHasCapsule(v)) {
+                    activateVessel(v.id);
+                    return;
+                }
+            }
+            toastQueue.push({
+                title: '没 有 其 他 船',
+                name: '没有可接管的航天器',
+                desc: '只有带控制舱的船可以接管（炸断船体可获得多截）',
+            });
+        }
+
         // 失控航天器：走**和玩家船同一套**物理（引力/大气阻力/撞击损伤/再入加热）
         // 以前残骸只有引力和阻力，于是「残骸永远不会被烧毁、不会掉血」，
         // 和玩家船形成两套逻辑 —— 这就是各种不一致的根源。
@@ -1493,6 +1574,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (e.code === 'Comma') { cycleTimeScale(-1); return; }
             if (e.code === 'Period') { cycleTimeScale(1); return; }
             if (e.code === 'KeyT') { toggleTouchPanel(); return; }
+            if (e.code === 'KeyV') cycleVessel();
             if (e.code === 'KeyP') toggleChute();
             if (e.code === 'KeyE') toggleEngine();
             if (e.code === 'KeyS') saveGame();
@@ -1535,7 +1617,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             ['t-thr-up', 'ArrowUp'], ['t-thr-down', 'ArrowDown'],
             ['t-ignite', 'KeyE'],
             ['t-zoom-in', 'BracketRight'], ['t-zoom-out', 'BracketLeft'],
-            ['t-fuel', 'Equal'], ['t-dump', 'Minus'], ['t-chute', 'KeyP'],
+            ['t-fuel', 'Equal'], ['t-dump', 'Minus'], ['t-chute', 'KeyP'], ['t-vessel', 'KeyV'],
         ];
 
         touchButtons.forEach((pair) => {
@@ -2928,7 +3010,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             setShipDef, placeOnSurface, applyImpact, splitVessel, checkSeparation,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
             onKeyDown, blowUpPart, predictPath, rocketRenderPos, resetInterp,
-            toggleChute, hasChute, shipTiltDeg, sanitizeShipDef,
+            toggleChute, hasChute, shipTiltDeg, sanitizeShipDef, activateVessel, cycleVessel, vesselHasCapsule,
             get chuteState() { return chuteState; },
             set chuteState(v) { chuteState = v; },   // 测试直接设伞状态
             get chuteDragNow() { return chuteDragNow; },

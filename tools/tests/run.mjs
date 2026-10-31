@@ -567,6 +567,62 @@ test('[造船] 悬空零件载入过滤：保留含控制舱的连通组', () =>
     resetToGround();
 });
 
+test('[多船] activateVessel：接管残骸、旧主船降级、可切回（部件世界位置全程不变）', () => {
+    // 双舱船：炸掉中间油箱 → 分成两截，born 截必含控制舱
+    t.setShipDef({ version: 1, name: '双舱船', parts: [
+        { id: 'p1', type: 'tank',    x: 0, y: 0 },
+        { id: 'p2', type: 'capsule', x: 0, y: 2 },
+        { id: 'p3', type: 'tank',    x: 0, y: 5 },
+        { id: 'p4', type: 'capsule', x: 0, y: 7 },
+    ]});
+    t.resetInterp();
+    // 部件世界坐标 = 锚点 + 旋转(本地 - 质心)——分离/接管/切回全程不应变化
+    const partWorld = (spec, rk, p) => {
+        const ty = PART_TYPES[p.type];
+        const lx = (p.x + ty.w / 2 - spec.centerX) * 7;
+        const ly = (spec.box.maxY - (p.y + ty.h / 2)) * 7;
+        const a = (rk.angle - 90) * Math.PI / 180;
+        return {
+            x: rk.x + (lx - spec.com.x) * Math.cos(a) - (ly - spec.com.y) * Math.sin(a),
+            y: rk.y + (lx - spec.com.x) * Math.sin(a) + (ly - spec.com.y) * Math.cos(a),
+        };
+    };
+    const p2 = t.shipDef.parts.find(p => p.id === 'p2');
+    const p4 = t.shipDef.parts.find(p => p.id === 'p4');
+    const p2Before = partWorld(t.SPEC, t.rocket, p2);
+
+    t.destroyed.add('p3');
+    t.invalidateShipCache();
+    t.checkSeparation();
+    assert(t.vessels.length === 2, '应分成两截');
+    const born = t.vessels[1];
+    assert(t.vesselHasCapsule(born), 'born 截应含控制舱');
+    const mainAnchorAfterSplit = { x: t.rocket.x, y: t.rocket.y };   // 分离会把锚点挪到新质心
+    // 分离本身不跳位（锚点会挪到新质心，部件不动）
+    near(partWorld(t.SPEC, t.rocket, p2).x, p2Before.x, 1e-6, '分离后 p2 世界位置 X');
+    near(partWorld(t.SPEC, t.rocket, p2).y, p2Before.y, 1e-6, '分离后 p2 世界位置 Y');
+    const bornPos = { x: born.x, y: born.y };
+
+    // 接管 born：主视图换入 born 的状态
+    assert(t.activateVessel(born.id) === true, '接管应成功');
+    near(t.rocket.x, bornPos.x, 1e-6, '接管后锚点 = born');
+    near(t.rocket.y, bornPos.y, 1e-6, '接管后锚点 = born');
+    assert(t.shipDef.parts.length === 1 && t.shipDef.parts[0].id === 'p4', 'shipDef 应换成 born 的');
+    assert(t.vessels.length === 2, '世界里仍是两艘');
+    // 不变式：vessels 里有且仅有一个 mainView 条目（id = activeVesselId），位置不限
+    assert(t.vessels.filter(v => v.id === 'v0').length === 1, '主视图条目有且仅有一个');
+    near(partWorld(t.SPEC, t.rocket, p4).x, partWorld(born.spec, born, p4).x, 1e-6, '接管后 p4 世界位置 X');
+    near(partWorld(t.SPEC, t.rocket, p4).y, partWorld(born.spec, born, p4).y, 1e-6, '接管后 p4 世界位置 Y');
+
+    // cycleVessel 切回：锚点与部件位置全部复原
+    t.cycleVessel();
+    near(t.rocket.x, mainAnchorAfterSplit.x, 1e-6, '切回后锚点 = 分离后的主段锚点');
+    near(t.rocket.y, mainAnchorAfterSplit.y, 1e-6, '切回后锚点 = 分离后的主段锚点');
+    near(partWorld(t.SPEC, t.rocket, p2).x, p2Before.x, 1e-6, '切回后 p2 世界位置 X');
+    near(partWorld(t.SPEC, t.rocket, p2).y, p2Before.y, 1e-6, '切回后 p2 世界位置 Y');
+    resetToGround();
+});
+
 // ============================================================
 
 console.log('\n==========================================');
