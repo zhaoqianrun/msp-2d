@@ -241,6 +241,77 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
         let accumulator = 0;
 
+        // ==================== 渲染插值（Fix Your Timestep）====================
+        // 物理固定 60Hz 步进，显示器往往 120~240Hz：不插值的话世界会
+        // 「每 4 帧硬跳一步」（240Hz 下 75% 的渲染帧零运动——实测数据见
+        // 2026-11-01 排查）。做法：每个物理帧快照「步进前/步进后」两个状态，
+        // 渲染时按 alpha = 累加器余量/步长 在两者之间线性插值。
+        // 物理本身一行不改；传送类场景（换船/重开/读档/观战）调 resetInterp 归位。
+        const interp = {
+            alpha: 0,
+            rocket: { px: 0, py: 0, pa: 0, cx: 0, cy: 0, ca: 0 },   // p=prev c=curr a=angle
+            vessels: new Map(),                                     // id -> 同上结构
+            debris: [],                                             // 与 debris 按下标对齐
+        };
+
+        function snapInterp() {
+            // curr → prev，然后把当前逻辑状态采样为 curr。角度解回绕（±180 内）。
+            const shift = (e, x, y, a) => {
+                e.px = e.cx; e.py = e.cy; e.pa = e.ca;
+                e.cx = x; e.cy = y; e.ca = a;
+                if (e.ca - e.pa > 180) e.ca -= 360;
+                else if (e.ca - e.pa < -180) e.ca += 360;
+            };
+            shift(interp.rocket, rocket.x, rocket.y, rocket.angle);
+            for (const v of vessels) {
+                let e = interp.vessels.get(v.id);
+                if (!e) {
+                    interp.vessels.set(v.id, { px: v.x, py: v.y, pa: v.angle, cx: v.x, cy: v.y, ca: v.angle });
+                    continue;
+                }
+                shift(e, v.x, v.y, v.angle);
+            }
+            if (interp.debris.length !== debris.length) {
+                interp.debris = debris.map(d => ({ px: d.x, py: d.y, cx: d.x, cy: d.y }));
+            } else {
+                for (let i = 0; i < debris.length; i++) shift(interp.debris[i], debris[i].x, debris[i].y, 0);
+            }
+        }
+
+        function resetInterp() {
+            // 传送后归位：prev = curr = 当前逻辑状态（下一帧起重新积累）
+            interp.alpha = 0;
+            interp.vessels.clear();
+            const r = interp.rocket;
+            r.px = r.cx = rocket.x; r.py = r.cy = rocket.y; r.pa = r.ca = rocket.angle;
+            for (const v of vessels) {
+                interp.vessels.set(v.id, { px: v.x, py: v.y, pa: v.angle, cx: v.x, cy: v.y, ca: v.angle });
+            }
+            interp.debris = debris.map(d => ({ px: d.x, py: d.y, cx: d.x, cy: d.y }));
+        }
+
+        // 渲染取值：逻辑状态在两个物理快照之间的插值位置
+        function rocketRenderPos() {
+            const r = interp.rocket, a = interp.alpha;
+            return { x: r.px + (r.cx - r.px) * a,
+                     y: r.py + (r.cy - r.py) * a,
+                     angle: r.pa + (r.ca - r.pa) * a };
+        }
+        function vesselRenderPos(v) {
+            const e = interp.vessels.get(v.id);
+            if (!e) return { x: v.x, y: v.y, angle: v.angle };
+            const a = interp.alpha;
+            return { x: e.px + (e.cx - e.px) * a,
+                     y: e.py + (e.cy - e.py) * a,
+                     angle: e.pa + (e.ca - e.pa) * a };
+        }
+        function debrisRenderPos(i) {
+            const e = interp.debris[i];
+            if (!e) return null;
+            const a = interp.alpha;
+            return { x: e.px + (e.cx - e.px) * a, y: e.py + (e.cy - e.py) * a };
+        }
+
         // ==================== 时间加速 ====================
         // 主循环是「固定步长 + 累加器」，所以加速只要把累加器乘个倍率，
         // 物理本身一行都不用改（每步还是 1/60 秒，只是每帧跑更多步）。
@@ -999,10 +1070,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             rocket.heat = 0;
             stats.escapedFar = false;
             placeOnSurface();
-            {   // 相机跟着回到地面上的新位置
-                const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
-                camera.x = camPt.x; camera.y = camPt.y;
-            }
+            resetInterp();   // 重开是传送：插值状态归位
             if (main) {
                 main.x = rocket.x; main.y = rocket.y;
                 main.vx = 0; main.vy = 0; main.landed = true;
@@ -1035,9 +1103,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             rocket.throttle = 1;
             rocket.state = 'idle';
             placeOnSurface();
-            const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
-            camera.x = camPt.x;
-            camera.y = camPt.y;
+            resetInterp();   // 换船是传送：插值状态归位，相机由渲染循环接管
         }
 
         // ==================== 本局任务自动存档 ====================
@@ -1130,6 +1196,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                         vessels.push(v);
                     }
                 }
+                resetInterp();
                 missionRestored = true;
                 missionSig = d.sig;
                 return true;
@@ -2024,6 +2091,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (isSpectator()) {
                 // 观战端：不跑物理，只把操控端的状态插值渲染出来
                 applyRemoteWorld();
+                resetInterp();   // 观战端不做物理插值，直接渲染服务器插值结果
                 accumulator = 0;
             } else {
                 // 时间加速：把这一帧代表的「游戏时间」乘上倍率
@@ -2031,28 +2099,31 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 // 单帧最多跑这么多步，防止高倍率下卡死（超过就丢弃剩余时间）
                 const MAX_STEPS_PER_FRAME = 260;
                 let steps = 0;
-                while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
-                    physicsStep(FIXED_DT);
-                    accumulator -= FIXED_DT;
-                    steps++;
+                if (accumulator >= FIXED_DT) {
+                    snapInterp();    // prev ← 本帧步进前的状态
+                    while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
+                        physicsStep(FIXED_DT);
+                        accumulator -= FIXED_DT;
+                        steps++;
+                    }
+                    snapInterp();    // curr ← 本帧步进后的状态
                 }
                 if (accumulator > FIXED_DT * MAX_STEPS_PER_FRAME) {
                     accumulator = 0;   // 追不上就丢弃，避免越积越多
                 }
+                interp.alpha = Math.max(0, Math.min(1, accumulator / FIXED_DT));
             }
 
             // 和服务器同步：操控端上报，观战端拉取
             if (netMode) { sendState(); fetchState(); }
 
             // 相机对准质心 —— 原点在船底，直接跟原点的话大船会偏在屏幕下方看不全
-            const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
-            // 相机硬锁飞船质心，不做任何平滑。
-            // 任何平滑系数（0.15 lerp / 指数追赶）产生的滞后都与速度成正比：
-            // 船越快越偏，帧率一波动滞后量还跟着抖 —— 这就是先后两版
-            // 「相机跟不住 / 一卡一卡」的根因。平滑由物理本身保证（位置连续），
-            // 相机只负责居中；传送类场景（换船/重开/读档）各自直接设置相机。
-            camera.x = camPt.x;
-            camera.y = camPt.y;
+            // 相机硬锁「渲染位置」（插值后的船）：锁的是画出来的那艘船。
+            // 硬锁原因：任何平滑系数的滞后都与速度成正比（见 4243a2a），
+            // 而连续性现在由渲染插值保证 —— 两件事各司其职。
+            const rr = rocketRenderPos();
+            camera.x = rr.x;
+            camera.y = rr.y;
 
             ctx.fillStyle = '#050510';
             ctx.fillRect(0, 0, canvasW, canvasH);
@@ -2148,9 +2219,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             // ---- 失控的航天器（残骸）：画成暗色的部件块 ----
             for (const v of vessels) {
                 if (v.id === activeVesselId) continue;
+                const rv = vesselRenderPos(v);
                 ctx.save();
-                ctx.translate(v.x, v.y);
-                ctx.rotate((v.angle - 90) * Math.PI / 180);
+                ctx.translate(rv.x, rv.y);
+                ctx.rotate((rv.angle - 90) * Math.PI / 180);
                 ctx.translate(-v.spec.com.x, -v.spec.com.y);
                 ctx.globalAlpha = 0.85;
                 for (const p of v.def.parts) {
@@ -2167,17 +2239,19 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             }
 
             // 爆炸碎片（画在飞船下面，看起来像从船体飞出来的）
-            for (const d of debris) {
+            for (let di = 0; di < debris.length; di++) {
+                const d = debris[di];
+                const dp = debrisRenderPos(di) || d;
                 const alpha = Math.max(0, Math.min(1, d.life / 0.8));
                 ctx.globalAlpha = alpha * 0.5;
                 ctx.fillStyle = '#ffaa33';
                 ctx.beginPath();
-                ctx.arc(d.x, d.y, d.size * 2.0, 0, Math.PI * 2);
+                ctx.arc(dp.x, dp.y, d.size * 2.0, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.globalAlpha = alpha;
                 ctx.fillStyle = d.color;
                 ctx.beginPath();
-                ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+                ctx.arc(dp.x, dp.y, d.size, 0, Math.PI * 2);
                 ctx.fill();
             }
             ctx.globalAlpha = 1;
@@ -2185,8 +2259,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             // 飞船：按你在造船厂拼的部件逐块画出来
             // 旋转中心 = 质心（和物理判定用的是同一个中心，不会出现"转起来错位"）
             ctx.save();
-            ctx.translate(rocket.x, rocket.y);
-            ctx.rotate((rocket.angle - 90) * Math.PI / 180);
+            ctx.translate(rr.x, rr.y);
+            ctx.rotate((rr.angle - 90) * Math.PI / 180);
             ctx.translate(-SPEC.com.x, -SPEC.com.y);
             drawShip(ctx, rocket.state === 'firing' && rocket.fuel > 0, performance.now());
 
@@ -2407,6 +2481,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
             camera.x = camPt.x; camera.y = camPt.y;
         }
+        resetInterp();   // 开局初始化插值状态（无论是否从任务档恢复）
         setInterval(pollControl, CTRL_INTERVAL_MS);
 
         // 如果服务器上有造船厂存的飞船，就用它（手机造的船电脑也能飞）
@@ -2516,6 +2591,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                         placeOnSurface();
                     }
                     camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom));
+                    resetInterp();   // 读档是传送：插值状态归位
                     alert('读档成功！');
                 })
                 .catch(err => {
@@ -2557,6 +2633,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             shipInfo, shipMass, thrustAccel, shipSpec, gravityAt, atmosphereDensity,
             setShipDef, placeOnSurface, applyImpact, splitVessel, checkSeparation,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
-            onKeyDown, blowUpPart, predictPath,
+            onKeyDown, blowUpPart, predictPath, rocketRenderPos, resetInterp,
             resetToasts,   // 测试用：清掉正在显示 + 排队中的全部横幅
         };

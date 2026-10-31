@@ -408,7 +408,7 @@ test('[输入] 100x 下旋转按真实时间响应：10 帧约 15°，不再一�
     resetToGround();
 });
 
-test('[相机] 相机硬锁飞船：任何速度/倍率下船恒在屏幕正中（不滞后不抖动）', () => {
+test('[相机] 相机硬锁渲染位置：任何速度/倍率下与画出来的船精确重合', () => {
     resetToGround();
     // 直接放进 500km 高的圆轨道（速度 ~2780 px/s，100x 下一帧位移 ~4600 px）
     const r0 = planet.radius + 500000;
@@ -424,8 +424,40 @@ test('[相机] 相机硬锁飞船：任何速度/倍率下船恒在屏幕正中�
     t.camera.zoom = 1;
     t.timeScaleIdx = 5;      // 100x
     env.pumpFrames(30);
-    const gap = Math.hypot(t.camera.x - t.rocket.x, t.camera.y - t.rocket.y);
-    assert(gap < 1e-6, '相机应与飞船精确重合, gap=' + gap.toFixed(3) + 'px（旧平滑实现滞后 ~400px 且随帧率抖动）');
+    const rp = t.rocketRenderPos();
+    const gap = Math.hypot(t.camera.x - rp.x, t.camera.y - rp.y);
+    assert(gap < 1e-6, '相机应与渲染位置精确重合, gap=' + gap.toFixed(3) + 'px');
+    t.timeScaleIdx = 0;
+    resetToGround();
+});
+
+test('[插值] 240Hz 帧节拍下渲染位置逐帧连续（旧实现 75% 帧零运动）', () => {
+    resetToGround();
+    const r0 = planet.radius + 500000;
+    const v = Math.sqrt(GRAVITY_MU / r0);
+    t.rocket.x = planet.x;
+    t.rocket.y = planet.y - r0;
+    t.rocket.vx = v;
+    t.rocket.vy = 0;
+    t.rocket.landed = false;
+    t.rocket.state = 'idle';
+    t.resetInterp();
+    // 预热：插值对在第一次物理步进后才建立（resetInterp 让 prev=curr）
+    env.pumpFrames(8, 1000 / 240);
+    const deltas = [];
+    let prevX = null;
+    for (let i = 0; i < 232; i++) {
+        env.pumpFrames(1, 1000 / 240);
+        const rp = t.rocketRenderPos();
+        if (prevX !== null) deltas.push(rp.x - prevX);
+        prevX = rp.x;
+    }
+    const zeros = deltas.filter(d => Math.abs(d) < 1).length;
+    assert(zeros === 0, `不应有零运动帧（旧实现 75% 零运动）, got ${zeros}/${deltas.length}`);
+    const avg = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+    near(avg, v / 240, v / 240 * 0.3, '平均帧位移');
+    const max = Math.max(...deltas.map(Math.abs));
+    assert(max < (v / 60) * 1.05, '最大帧位移 ' + max.toFixed(1) + 'px 不应超过一个物理步 46.4px');
     t.timeScaleIdx = 0;
     resetToGround();
 });
