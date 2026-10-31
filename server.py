@@ -183,6 +183,17 @@ def get_local_ip():
 
 # ==================== HTTP 处理器 ====================
 class GameHandler(http.server.SimpleHTTPRequestHandler):
+    # Windows 的注册表可能把 .js 映成 text/plain —— ES Module 会被浏览器直接拒载
+    # （"Failed to load module script ... MIME type ('text/plain') is not executable"）。
+    # 显式钉住关键类型，不依赖系统注册表（后面的模块化重构全靠它）。
+    extensions_map = {
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css",
+        ".js": "text/javascript",
+        ".mjs": "text/javascript",
+        ".json": "application/json",
+    }
+
     def __init__(self, *args, **kwargs):
         # 明确指定网页目录，不受“从哪个目录启动”影响
         super().__init__(*args, directory=BASE_DIR, **kwargs)
