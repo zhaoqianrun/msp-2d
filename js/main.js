@@ -1,6 +1,16 @@
 // ==================== 模块导入 ====================
 import { PART_TYPES, PART_PX } from './ship/partTypes.js';
 import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
+import {
+    FIXED_DT, TIME_SCALES, ROTATE_SPEED, THROTTLE_RATE, THROTTLE_FINE_RATE,
+    ZOOM_RATE_PER_SEC, FUEL_BURN_SECONDS, FUEL_FILL_RATE,
+    M_PER_PX, PHYS_M_PER_PX, DIST_M_PER_PX, PLANET_RADIUS_KM, PLANET_RADIUS_M,
+    ATMO_TOP_KM, ATMO_TOP_M, ATMO_RATIO, ATMO_SCALE_HEIGHT_KM, ATMO_SCALE_HEIGHT, ATMO_FADE_KM,
+    SURFACE_GRAVITY_MS2, G0_PX, LANDING_SPEED, DAMAGE_SPEED, DESTROY_SPEED, PART_HP,
+    HEAT_LIMIT, HEAT_COOL_RATE, AMBIENT_TEMP, DRAG_COEF, REENTRY_SPEED, GROUND_FRICTION,
+} from './core/constants.js';
+import { fmtDistance, fmtSpeed } from './core/format.js';
+import { planet, GRAVITY_MU, gravityAt, atmosphereDensity, atmoThickness } from './world/planet.js';
 
 
         const canvas = document.getElementById('game');
@@ -219,37 +229,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
         window.addEventListener('pointerdown', startBgm);
         window.addEventListener('keydown', startBgm);
 
-        // ==== 游戏数据 ====
-        // 星球：半径 2500 km，参数按真实物理选取（火星级重力）：
-        //
-        //   表面重力 3.71 m/s²   —— 火星表面重力
-        //   半径     2500 km
-        //   密度     5.31 g/cm³  —— 比火星(3.9)略重，仍在岩石行星范围
-        //   逃逸速度 4307 m/s    —— 充分留住 N₂/O₂ 大气（比值 8.5 / 9.1）
-        //   表面温度 288 K (15°C) —— 猫咪能活
-        //
-        // 【为什么重力从 1.35 提到 3.71】
-        // 重力 1.35 时飞船「关机后要滑行一分多钟才停下」：
-        //   无阻力时减速时间 ≈ v/g，重力越小刹得越慢。
-        //   1.35 -> 58 m/s 要 43 秒；3.71 -> 只要 15.6 秒。
-        // 而且低速时空气阻力 ∝ v² 几乎为零，单靠加阻力救不回来，
-        // 只能靠重力 —— 所以这里必须把重力提上来。
-        //
-        // 这几个量由同一套物理互相约束，不能单独改：
-        //   密度 = 3g / (4πGR)，逃逸速度 = √(2gR)，标高 = kT/(mg)
-        //
-        // 引力用“平方反比”，和真实星球、和 SFS 一样：
-        //     引力 = g0 × (radius / 距离)²
-        // 所以贴着地面时的引力就是 g0 —— 想让星球变重只改 SURFACE_GRAVITY_MS2。
-        const planet = {
-            x: 500, y: 350,
-            // 像素半径 2500000 = 2500 km，按 1 px = 1 m 换算
-            radius: 2500000,
-            // 注意：这里**不再**存 surfaceGravity。
-            // 以前存过一个 19.6，但物理实际用的是另一个值，
-            // 两者差几十倍，导致 HUD 的圆轨道速度、推重比、轨道根数全部算错。
-            // 现在全场景只有一个数据源：SURFACE_GRAVITY_MS2（米制）+ G0_PX（像素制）。
-        };
         const rocket = {
             x: planet.x, y: planet.y - (planet.radius + 8), vx: 0, vy: 0,   // 一开始就停在星球表面（跟着半径自动算，改星球大小不用再改这里）
             angle: 90,
@@ -268,8 +247,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
         // 所以 minZoom 取 1e-4。maxZoom 12 时飞船 49 px 会放大到 588 px，够近。
         let camera = { x: 0, y: 0, zoom: 1.0, minZoom: 0.0001, maxZoom: 12.0 };
 
-        // 物理参数
-        const FIXED_DT = 1 / 60;
         let accumulator = 0;
 
         // ==================== 时间加速 ====================
@@ -277,7 +254,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
         // 物理本身一行都不用改（每步还是 1/60 秒，只是每帧跑更多步）。
         //
         // 可选的倍率档位（按 . 加速 / , 减速，或点屏幕右上角的按钮）
-        const TIME_SCALES = [1, 2, 5, 10, 50, 100];
         let timeScaleIdx = 0;
         function timeScale() { return TIME_SCALES[timeScaleIdx]; }
         function cycleTimeScale(dir) {
@@ -290,77 +266,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
         }
         let lastTime = performance.now();
 
-        // 旋转速度（度/秒），改成你要的手感就调这个数
-        // 180 太贼了，SFS 的手感是慢而稳 —— 改成 90
-        const ROTATE_SPEED = 90;
-
-        // 节流阀调节速度（每秒变化多少），按住 Shift 改成微调速度
-        // 0.30 要 3.3 秒才满油门，太肉了 —— 改成 0.50（2 秒满油门，跟手）
-        const THROTTLE_RATE = 0.50;
-        const THROTTLE_FINE_RATE = 0.08;
-
-        // 缩放：按住 [ / ] 时的缩放速度（每秒乘多少）
-        const ZOOM_RATE_PER_SEC = 0.25;
-
-        // 燃料：满格能烧多少秒（100% 油门），以及在地面加油/卸油的速度（每秒多少格）
-        // 680 秒是按「够入轨 + 余量」算出来的：
-        //   满油净加速度 = 20/115 - 3.71/50 = 0.0996 px/s²
-        //   加速到圆轨道速度 60.9 px/s 需要约 611 秒
-        //   留 1.1 倍余量（爬升、掉头、修正）-> 680 秒
-        //
-        // 推力从 40 降到 20 后，同样多的油可以烧两倍时间。
-        const FUEL_BURN_SECONDS = 680;  // 满油门烧完一箱要多少秒
-        const FUEL_FILL_RATE = 0.6;     // 每秒补 60%，大约 1.7 秒加满
-
-        // ==================== 尺度系统（单一比例）====================
-        // 只有这一个比例：1 像素 = 1 米（恒定，不随缩放变）
-        //
-        //   星球 2500000 px × 1 = 2500 km  ✅
-        //   部件 1 格 = 7 px × 1 = 7 m（默认船 14 m 宽 × 49 m 高，正常火箭大小）
-        //
-        // 想改尺度只改这一个数：它同时决定飞船大小和星球大小。
-        // 【1 px = 1 m】以前是 1 px = 50 m，结果飞船在物理世界里高达 2450 m
-        // （49 px × 50 m），几十米/秒相对这么大的船简直没动，屏幕上每秒不到 1 像素。
-        // SFS 的手感是「船几十米高、速度几十米/秒，屏幕上看得到明显移动」——
-        // 那正是 1 px ≈ 1 m。所以这里改成 1。
-        //
-        // 改这一个数，下面这些全部跟着自动换算（它们都用 M_PER_PX）：
-        //   引力 G0_PX = g / M_PER_PX
-        //   星球像素半径、大气标高、距离/速度显示……
-        // 唯独「像素制」的力（推力、阻力）要手动跟着缩放，见各自的注释。
-        const M_PER_PX = 1;               // 全局唯一比例：1 px = 1 m
-
-        const PLANET_RADIUS_KM = 2500;    // 星球真实半径 2500 km
-        const PLANET_RADIUS_M = PLANET_RADIUS_KM * 1000;
-        const ATMO_TOP_KM = 120;          // 大气顶 120 km（≈5 个标高，参考线不是物理墙）
-        const ATMO_TOP_M = ATMO_TOP_KM * 1000;
-
-        // 兼容旧名字：物理与换算都用这一个值
-        const PHYS_M_PER_PX = M_PER_PX;
-        const DIST_M_PER_PX = M_PER_PX;   // 距离显示同尺度
-
-        // 表面引力（米制，唯一数据源）
-        // 3.71 m/s² 是火星表面重力，配合半径 2500 km：
-        //   逃逸速度 √(2×3.71×2.5e6) = 4307 m/s，充分留住 O₂/N₂ 大气；
-        //   密度 3g/(4πGR) = 5.31 g/cm³，落在真实岩石行星范围。
-        // 关键收益：关机后减速时间 ≈ v/g，比 1.35 时快 2.75 倍。
-        const SURFACE_GRAVITY_MS2 = 3.71;
-        // 换算成像素加速度，供物理使用：a_px = a_m / M_PER_PX
-        const G0_PX = SURFACE_GRAVITY_MS2 / M_PER_PX;   // = 3.71 px/s²（1px = 1m）
-
-        // 像素 → 距离文字。距离换算与缩放无关（缩放只影响看起来多大）。
-        function fmtDistance(px) {
-            const m = px * DIST_M_PER_PX;
-            if (Math.abs(m) >= 1000) return (m / 1000).toFixed(m >= 100000 ? 0 : 2) + ' km';
-            if (Math.abs(m) >= 1) return m.toFixed(m >= 100 ? 0 : 1) + ' m';
-            return (m * 100).toFixed(0) + ' cm';
-        }
-        // 像素/秒 → 速度文字
-        function fmtSpeed(pxPerSec) {
-            const ms = pxPerSec * M_PER_PX;
-            if (Math.abs(ms) >= 1000) return (ms / 1000).toFixed(2) + ' km/s';
-            return ms.toFixed(ms >= 100 ? 0 : 1) + ' m/s';
-        }
         // 飞船尺寸（米）—— 和其他一切共用同一个比例
         // 数值虽大（公里级），但和星球 1000 km 是同一把尺子，量纲自洽。
         function shipSizeMeters() {
@@ -555,10 +460,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
             { id: 'round_trip',    name: '环游半球',   desc: '着陆点离起飞点超过 3000 px' },
         ];
 
-        // 引力常数 μ = g0 × R²（像素制）—— 用于能量判据 / 轨道根数 / 逃逸判定。
-        // 以前这里乘的是 planet.surfaceGravity（19.6），比真实 g0（0.0196）大 1000 倍，
-        // 导致「逃脱摇篮」成就几乎永远拿不到、轨道根数也是错的。现在统一用 G0_PX。
-        const GRAVITY_MU = G0_PX * planet.radius * planet.radius;
         const achieved = new Set();
         const pendingSettlement = [];   // 这一趟任务拿到、还没结算的成就
         const toastQueue = [];
@@ -697,28 +598,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
             stats.lastAngle = ang;
         }
 
-        // 着陆参数
-        const LANDING_SPEED = 180;    // 扎向地面的速度小于它就稳稳着陆，大于它就弹一下
-
-        // ==================== 撞击损毁 ====================
-        // 撞得太狠，部件会被震坏、炸掉，同时吃掉一部分速度。
-        // 每个部件的耐久不同：燃料箱厚实，控制舱脆一些。
-        const DAMAGE_SPEED = 120;     // 超过这个撞击速度才开始受损
-        const DESTROY_SPEED = 700;    // px/s，撞得这么快才当场解体（原来 420 太低，正常降落都可能触发）
-        const PART_HP = { capsule: 90, tank: 130, engine: 120 };
-
-        // ==================== 再入热损毁 ====================
-        // 高速冲进大气时，**迎着气流的那一面**会升温。
-        // 哪个部件在前面晒着，哪个就先烧起来；温度到阈值就炸。
-        // 控制舱（返回舱）有隔热盾，阈值高得多 —— 它就是干这个的。
-        const HEAT_LIMIT = {
-            capsule: 900,    // 控制舱：带隔热盾，最耐烧
-            tank:    260,    // 燃料箱：薄壳，最先烧穿
-            engine:  420,    // 发动机：金属，中等
-        };
-        const HEAT_COOL_RATE = 220;      // 每秒散热多少度（不在大气里时）
-        const AMBIENT_TEMP = 20;         // 环境温度
-
         // 每个部件的当前温度
         let partTemp = {};
         let heatWrecked = 0;             // 这一趟烧毁了几个
@@ -822,44 +701,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
             return { part: best, temp: bestT, limit: HEAT_LIMIT[best.type] || 800 };
         }
 
-        // ==================== 大气层 ====================
-        // 星球外面包一层大气：有阻力、有再入发光。
-        // 厚度按半径的 15% 算（现实里只有 1.5%，但那样在屏幕上根本看不见）。
-        // 厚度占半径的 60%。现实里大气只有半径的 1.5%，
-        // 但本星球半径只有 200 m，按真实比例算出来只有 3 m 厚，
-        // 屏幕上根本看不见，也没有「冲出大气」的感觉。
-        // 大气厚度：真实 50 km。
-        // 星球半径 1000 km，所以占比 = 50/1000 = 5%
-        // （地球是 1.6%，这里略厚一点，让「冲出大气」更有感觉）
-        const ATMO_RATIO = ATMO_TOP_M / PLANET_RADIUS_M;
-        // 阻力系数。drag = 系数 x 密度 x 速度²（**像素制**）
-        //
-        // 【这一版是按终端速度重算的，之前的 2e-6 是个严重错误】
-        // 2e-6 是按「500 px/s」调的，但 500 px/s = 25000 m/s（25 km/s）——
-        // 玩家实际速度只有 1~61 px/s（50~3045 m/s），
-        // 所以旧系数下阻力只有重力的 0.16%，等于没有大气。
-        //
-        // 现在按**终端速度**定系数：CAP = G0 / v_term²
-        // 终端速度 = 阻力恰好等于重力时的速度，也就是自由落体的最大速度。
-        // 取地面终端速度 1200 m/s（= 1200 px/s，因为现在 1px = 1m），
-        // 得到 CAP = 3.71 / 1200² = 2.6e-6。
-        //
-        // 检查表（密度按 23.1 km 标高，重力 3.71 m/s²）：
-        //   速度      0 km 阻力  占重力    23 km 阻力  占重力
-        //    100 m/s     0.026      1%        0.010      0%
-        //    400 m/s     0.416     11%        0.154      4%
-        //    800 m/s     1.664     45%        0.616     17%
-        //   1200 m/s     3.744    101%        1.386     37%   <- 终端速度
-        //   1600 m/s     6.656    179%        2.464     66%
-        //   3045 m/s    24.11     650%        8.925    241%   <- 入轨速度
-        //
-        // 效果：低空有温和刹车，高速再入会被大气明显减速；
-        //       高空（>100 km）阻力快速消失，正常入轨不受影响。
-        const DRAG_COEF = 2.6e-6;
-        const REENTRY_SPEED = 800;          // 超过这个速度（m/s）冲进大气就开始发光
-
-        function atmoThickness() { return planet.radius * ATMO_RATIO; }
-
         // HUD 上那行大气状态文字
         // 大气状态文字。
         // 大气改成指数衰减后，不再有「内 / 外」这种硬边界 ——
@@ -944,39 +785,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
             partsBarEl.innerHTML = html;
         }
 
-
-        // 某处的大气密度：0 = 真空，1 = 贴着地面
-        // 大气密度用**指数衰减**：density = exp(-alt / SCALE_HEIGHT)
-        //   SCALE_HEIGHT 是「标高」：每上升这么多，密度降到 1/e
-        //
-        // 标高按真实物理算：H = kT / (m·g)
-        //   本星球：T = 288 K(15°C，猫咪能活)，主要成分 N₂，g = 3.71 m/s²
-        //   -> H = 1.381e-23 × 288 / (28 × 1.661e-27 × 3.71) = 23.1 km
-        //
-        // 对比：地球 8.5 km（g=9.81），本星球 23.1 km（g=3.71）——
-        // 重力小 2.6 倍，大气就厚 2.6 倍，这是物理必然。
-        //
-        // 23.1 km 标高的曲线：
-        //     0 km 密度 100%
-        //    16 km 密度  50%
-        //    23 km 密度  37%   <- 1 个标高
-        //    46 km 密度  14%   <- 2 个标高
-        //    69 km 密度   5%
-        //   120 km 密度 0.6%   <- 参考线「大气顶」
-        const ATMO_SCALE_HEIGHT_KM = 23.1;                 // 标高（按 kT/mg 算出）
-        const ATMO_SCALE_HEIGHT = (ATMO_SCALE_HEIGHT_KM * 1000) / DIST_M_PER_PX;
-        const ATMO_FADE_KM = 200;                          // 200 km 以上完全忽略（≈8.7 个标高）
-
-        function atmosphereDensity(x, y) {
-            const r = Math.hypot(x - planet.x, y - planet.y);
-            const alt = r - planet.radius;
-            if (alt < 0) return 1;
-            // 200 km 以上当作真空（8.7 个标高，密度已降到千万分之一）
-            if (alt * DIST_M_PER_PX > ATMO_FADE_KM * 1000) return 0;
-            // 指数衰减
-            const d = Math.exp(-alt / ATMO_SCALE_HEIGHT);
-            return d > 1 ? 1 : d;
-        }
 
         // 当前飞船所在位置的大气密度
         function myAtmosphere() {
@@ -1619,8 +1427,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
         function alivePartCount() { return shipInfo().alive; }
         function hasWorkingEngine() { return shipInfo().engine > 0; }
         function hasWorkingCapsule() { return shipInfo().capsule > 0; }
-        const GROUND_FRICTION = 0.85; // 贴地摩擦：停在地上时横向速度每帧乘这个数
-
         // 日志计时器
         let lastLogTime = 0;
         const LOG_INTERVAL = 1000; // 每秒输出一次日志
@@ -1847,25 +1653,6 @@ import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
         canvas.addEventListener('pointerup', endPointer);
         canvas.addEventListener('pointercancel', endPointer);
         canvas.addEventListener('pointerleave', endPointer);
-
-        // ==== 引力：平方反比（真正的轨道引力）====
-        // a = G0_PX × (radius / 距离)²
-        // 这里不用另外加“离心力”：我们用的是不跟着飞船转的坐标系，
-        // 只要横向速度够快，飞船就会一直“绕着、掉不到地上”—— 这就是轨道。
-        //
-        // SURFACE_GRAVITY_MS2 / G0_PX 已在上面「尺度系统」里定义（唯一数据源），
-        // 这里不再重复声明，避免两处不一致再次出现。
-
-        // 引力：平方反比，a = g0 × (R / r)²
-        // g0 直接用上面算好的 G0_PX（像素/秒²），恒定，绝不用相机缩放。
-        function gravityAt(x, y) {
-            const dx = planet.x - x;
-            const dy = planet.y - y;
-            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-            const safe = Math.max(dist, planet.radius * 0.5);   // 防止贴到球心时引力爆表
-            const a = G0_PX * (planet.radius / safe) ** 2;
-            return { ax: (dx / dist) * a, ay: (dy / dist) * a, dist };
-        }
 
         // ==== 物理更新 ====
         function physicsStep(dt) {
