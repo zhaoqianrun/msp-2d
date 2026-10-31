@@ -1512,7 +1512,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             ['t-thr-up', 'ArrowUp'], ['t-thr-down', 'ArrowDown'],
             ['t-ignite', 'KeyE'],
             ['t-zoom-in', 'BracketRight'], ['t-zoom-out', 'BracketLeft'],
-            ['t-fuel', 'Equal'], ['t-dump', 'Minus'],
+            ['t-fuel', 'Equal'], ['t-dump', 'Minus'], ['t-chute', 'KeyP'],
         ];
 
         touchButtons.forEach((pair) => {
@@ -2314,6 +2314,24 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 c.lineTo(x + w * 0.22, y + h - 1);
                 c.closePath();
                 c.fillStyle = '#2b323a'; c.fill();
+
+            } else if (type === 'chute') {
+                // 包好的降落伞：橙色伞包 + 捆扎带（展开后的伞面见 drawChute）
+                const grad = c.createLinearGradient(x, 0, x + w, 0);
+                grad.addColorStop(0, '#e07018'); grad.addColorStop(0.4, t.body); grad.addColorStop(1, '#c46a1a');
+                shipRoundRect(c, x, y, w, h, w * 0.28);
+                c.fillStyle = grad; c.fill();
+                c.strokeStyle = t.edge; c.lineWidth = 1; c.stroke();
+                // 十字捆扎带
+                c.strokeStyle = t.accent;
+                c.lineWidth = Math.max(1, w * 0.09);
+                c.beginPath();
+                c.moveTo(x + w / 2, y + 1); c.lineTo(x + w / 2, y + h - 1);
+                c.moveTo(x + 1, y + h * 0.45); c.lineTo(x + w - 1, y + h * 0.45);
+                c.stroke();
+                // 顶部开伞扣
+                c.fillStyle = t.accent;
+                c.fillRect(x + w * 0.35, y - 1, w * 0.3, Math.max(2, h * 0.08));
             }
         }
 
