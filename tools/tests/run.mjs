@@ -219,6 +219,174 @@ test('[shipSpec] 质心随燃料前移（满油 23.74 → 空油 23.33）', () =
 });
 
 // ============================================================
+console.log('\n== Phase3 修复回归 ==');
+
+const { GRAVITY_MU } = await import('../../js/world/planet.js');
+
+// 支持异步用例（loadGame 内部走 promise 链）
+async function testAsync(name, fn) {
+    try {
+        await fn();
+        passed++;
+        console.log('  PASS  ' + name);
+    } catch (e) {
+        failed++;
+        failures.push(name + ' :: ' + (e && e.message));
+        console.log('  FAIL  ' + name);
+        console.log('        ' + (e && e.message));
+    }
+}
+
+test('[ce176c8] 预测·圆轨道：解析椭圆画满一圈且半径恒定', () => {
+    const r0 = planet.radius + 500000;
+    const v = Math.sqrt(GRAVITY_MU / r0);
+    const pts = t.predictPath({ x: planet.x, y: planet.y - r0, vx: v, vy: 0 }, false, 1);
+    assert(pts.length >= 700, '应画满 360 段，got ' + pts.length / 2 + ' 点');
+    for (let i = 0; i < pts.length; i += 2) {
+        const rr = Math.hypot(pts[i] - planet.x, pts[i + 1] - planet.y);
+        near(rr, r0, r0 * 0.001, '圆轨道半径恒定');
+    }
+});
+
+test('[ce176c8] 预测·掠地椭圆：线画到真实地表为止（旧实现提前 5km 收笔）', () => {
+    const r0 = planet.radius + 1000000;
+    const v = Math.sqrt(GRAVITY_MU / r0) * 0.55;   // 近点会扎进地表的椭圆
+    const pts = t.predictPath({ x: planet.x, y: planet.y - r0, vx: v, vy: 0 }, false, 2);
+    assert(pts.length >= 8, '应有轨迹');
+    let minR = Infinity;
+    for (let i = 0; i < pts.length; i += 2) {
+        const rr = Math.hypot(pts[i] - planet.x, pts[i + 1] - planet.y);
+        assert(rr >= planet.radius - 1, '线不应画进地下');
+        minR = Math.min(minR, rr);
+    }
+    assert(minR < planet.radius + 100, '应画到贴近地表, 距地表 ' + (minR - planet.radius).toFixed(0) + 'px');
+});
+
+test('[ce176c8] 预测·数值与解析互证：圆轨道半径一致', () => {
+    const r0 = planet.radius + 500000;
+    const v = Math.sqrt(GRAVITY_MU / r0);
+    const num = t.predictPath({ x: planet.x, y: planet.y - r0, vx: v, vy: 0 }, true, 3000000);
+    for (let i = 2; i < Math.min(num.length, 200); i += 2) {
+        const rr = Math.hypot(num[i] - planet.x, num[i + 1] - planet.y);
+        near(rr, r0, r0 * 0.005, '数值路径半径');
+    }
+});
+
+test('[ce176c8] 预测·数值路径 100ms 节流复用', () => {
+    const s = { x: planet.x, y: planet.y - (planet.radius + 8), vx: 0, vy: -1 };
+    const a = t.predictPath(s, true, 10000000);
+    const b = t.predictPath(s, true, 10000000 + 50);
+    assert(a === b, '50ms 内应复用缓存');
+    const c = t.predictPath(s, true, 10000000 + 200);
+    assert(c !== b, '超过 100ms 应重算');
+});
+
+test('[6938f81] 长按 .（repeat=true）不再连跳时间倍率', () => {
+    resetToGround();
+    const idx0 = t.timeScaleIdx;
+    t.onKeyDown({ code: 'Period', repeat: true });
+    assert(t.timeScaleIdx === idx0, 'repeat=true 不应换档');
+    t.onKeyDown({ code: 'Period', repeat: false });
+    assert(t.timeScaleIdx === idx0 + 1, '正常按应 +1 档');
+    t.onKeyDown({ code: 'Comma', repeat: false });
+    assert(t.timeScaleIdx === idx0, '恢复正常');
+});
+
+test('[6938f81] 100x 加速下横幅按真实时间显示 3 秒', () => {
+    resetToGround();
+    t.resetToasts();           // 前面用例残留的 toast（含正在显示的那条）先清掉
+    t.toastQueue.push({ title: '测试', name: '横幅回归', desc: '' });
+    t.timeScaleIdx = 5;      // 直接设 100x（用按键会往 toast 队列里塞 10 条倍率提示，污染断言）
+    assert(t.timeScaleIdx === 5, '应处于 100x 档');
+    env.pumpFrames(30);      // 0.5 真实秒（旧实现这里游戏时间已过 ~50 秒，横幅早没了）
+    const el = env.elements.get('achievement');
+    assert(el.style.opacity === '1', '横幅应仍在显示, opacity=' + el.style.opacity);
+    env.pumpFrames(220);     // 再过 ~3.7 真实秒
+    assert(el.style.opacity === '0', '3 秒后横幅应消失');
+    t.timeScaleIdx = 0;
+    assert(t.timeScaleIdx === 0, '应降回 1x');
+});
+
+test('[c54de99] 分离摆位：分离瞬间发动机与控制舱的世界位置保持不变', () => {
+    resetToGround();
+    env.pumpFrames(3);
+    const P = 7;
+    const a0 = (t.rocket.angle - 90) * Math.PI / 180;
+    const worldOf = (lx, ly) => ({
+        x: t.rocket.x + (lx - t.SPEC.com.x) * Math.cos(a0) - (ly - t.SPEC.com.y) * Math.sin(a0),
+        y: t.rocket.y + (lx - t.SPEC.com.x) * Math.sin(a0) + (ly - t.SPEC.com.y) * Math.cos(a0),
+    });
+    const engineW = worldOf((0 + 1 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (0 + 1)) * P);
+    const capsuleW = worldOf((0 + 1 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (5 + 1)) * P);
+
+    t.destroyed.add('d2');
+    t.invalidateShipCache();
+    t.checkSeparation();
+    assert(t.vessels.length === 2, '应分离成两截');
+    const born = t.vessels[1];   // 发动机那截
+    // 发动机在新截的本地中心 = (0,7)，新质心也在 (0,7) → 世界位置就是 v.x/v.y
+    near(born.x, engineW.x, 1e-3, '发动机世界 X');
+    near(born.y, engineW.y, 1e-3, '发动机世界 Y');
+    // 主段（控制舱）锚点也挪过：舱体世界位置同样不变
+    const capsuleAfter = worldOf((0 + 1 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (5 + 1)) * P);
+    near(capsuleAfter.x, capsuleW.x, 1e-3, '控制舱世界 X');
+    near(capsuleAfter.y, capsuleW.y, 1e-3, '控制舱世界 Y');
+    resetToGround();
+});
+
+test('[c54de99] 双油箱逐个炸掉：油量按活油箱份额扣，不留幽灵燃料', () => {
+    t.setShipDef({ version: 1, name: '双箱船', parts: [
+        { id: 'g1', type: 'engine',  x: 0, y: 0 },
+        { id: 'g2', type: 'tank',    x: 0, y: 2 },
+        { id: 'g3', type: 'tank',    x: 0, y: 5 },
+        { id: 'g4', type: 'capsule', x: 0, y: 8 },
+    ]});
+    env.pumpFrames(2);
+    const tank1 = t.shipDef.parts.find(p => p.id === 'g2');
+    const tank2 = t.shipDef.parts.find(p => p.id === 'g3');
+    t.blowUpPart(tank1, t.mainView);
+    near(t.rocket.fuel, 0.5, 1e-9, '炸第一箱后');
+    t.destroyed.add('g2');
+    t.blowUpPart(tank2, t.mainView);
+    near(t.rocket.fuel, 0, 1e-9, '炸第二箱后（旧实现会剩 25% 幽灵燃料）');
+    assert(t.debris.length >= 14, '应生成碎片');
+    const d = t.debris[0];
+    assert(Math.hypot(d.x - t.rocket.x, d.y - t.rocket.y) < 100, '碎片应落在肇事船附近');
+    resetToGround();
+});
+
+test('[6938f81] 单机模式不再空打 /api/state', () => {
+    resetToGround();
+    let calls = 0;
+    const oldFetch = globalThis.fetch;
+    globalThis.fetch = async () => { calls++; throw new TypeError('counted'); };
+    env.pumpFrames(70);
+    globalThis.fetch = oldFetch;
+    assert(calls === 0, '不应有任何请求, got ' + calls);
+});
+
+await testAsync('[6938f81] 读档只恢复相机 x/y/zoom，minZoom 不被旧档覆盖', async () => {
+    resetToGround();
+    const oldFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => ({
+            rocket: { x: planet.x, y: planet.y - planet.radius - 100, vx: 0, vy: 0,
+                      angle: 90, throttle: 0.5, fuel: 0.5, state: 'idle', landed: false },
+            camera: { x: 111, y: 222, zoom: 0.5, minZoom: 0.5, maxZoom: 3 },
+        }),
+    });
+    env.win.loadGame();
+    await new Promise(r => setTimeout(r, 20));
+    globalThis.fetch = oldFetch;
+    near(t.camera.x, 111, 1e-9, '相机 X');
+    near(t.camera.zoom, 0.5, 1e-9, '缩放');
+    assert(t.camera.minZoom === 0.0001, 'minZoom 不应被存档覆盖, got ' + t.camera.minZoom);
+    assert(t.camera.maxZoom === 12, 'maxZoom 不应被存档覆盖');
+    resetToGround();
+});
+
+// ============================================================
 
 console.log('\n==========================================');
 console.log(`结果：${passed} 通过，${failed} 失败`);
