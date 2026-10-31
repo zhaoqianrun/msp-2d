@@ -902,9 +902,17 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (!t) return;
 
             // 燃料箱被炸 → 它装的那部分油也没了。
-            // 按「这个箱子占总燃料容量的比例」从当前油量里扣掉。
-            if (t.fuel > 0 && v.spec.fuelCap > 0) {
-                const share = t.fuel / v.spec.fuelCap;
+            // 分母用「还活着的油箱总容量（含自己这箱）」：旧实现用 spec.fuelCap
+            // 不排除已炸油箱 —— 多箱船炸到最后会剩下对应箱子已不存在的幽灵燃料。
+            let aliveCap = t.fuel;
+            for (const q of v.def.parts) {
+                if (q.id !== p.id && !v.dead.has(q.id)) {
+                    const tq = PART_TYPES[q.type];
+                    if (tq) aliveCap += tq.fuel;
+                }
+            }
+            if (t.fuel > 0 && aliveCap > 0) {
+                const share = t.fuel / aliveCap;
                 const lost = v.fuel * share;   // 当前油量里属于这个箱子的部分
                 v.fuel = Math.max(0, v.fuel - lost);
                 if (v.isMain && lost > 0.001) {
@@ -916,17 +924,24 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 }
                 if (v.fuel <= 0 && v.state === 'firing') v.state = 'idle';
             }
+            // 碎片从「肇事船」的部件位置喷出：旧实现硬用主船的 SPEC/rocket，
+            // 残骸烧毁/撞毁时碎片会凭空出现在玩家船身上。
             const P = PART_PX;
-            const cx = (p.x + t.w / 2 - SPEC.centerX) * P;
-            const cy = (SPEC.box.maxY - (p.y + t.h / 2)) * P;
-            const world = shipPointWorld(cx, cy, rocket.angle);
+            const cx = (p.x + t.w / 2 - v.spec.centerX) * P;
+            const cy = (v.spec.box.maxY - (p.y + t.h / 2)) * P;
+            const da = (v.angle - 90) * Math.PI / 180;
+            const rx = cx - v.spec.com.x, ry = cy - v.spec.com.y;
+            const world = {
+                x: v.x + rx * Math.cos(da) - ry * Math.sin(da),
+                y: v.y + rx * Math.sin(da) + ry * Math.cos(da),
+            };
             for (let i = 0; i < 14; i++) {
                 const ang = Math.random() * Math.PI * 2;
                 const sp = 40 + Math.random() * 160;
                 debris.push({
                     x: world.x, y: world.y,
-                    vx: rocket.vx + Math.cos(ang) * sp,
-                    vy: rocket.vy + Math.sin(ang) * sp,
+                    vx: v.vx + Math.cos(ang) * sp,
+                    vy: v.vy + Math.sin(ang) * sp,
                     life: 1.6 + Math.random() * 1.4,
                     size: 1.5 + Math.random() * 2.5,
                     color: t.body,
@@ -1164,6 +1179,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             }
 
             const born = [];
+            // 主段会在循环中途替换 SPEC，先存住「分离前整船的质心」给摆放公式用
+            const prevCom = { x: SPEC.com.x, y: SPEC.com.y };
             groups.forEach((g, i) => {
                 if (i === mainIdx) {
                     // 主控那截：留在 rocket 里继续用
@@ -1183,14 +1200,16 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     }
                     return;
                 }
-                // 其它截：变成失控的航天器，按质心位置分开一点点
+                // 其它截：变成失控的航天器。
+                // 摆放公式：新船原点 = 旧船原点 + 旋转(旧质心 - 新质心)。
+                // 这样分离瞬间每个部件的世界位置和分离前一模一样 ——
+                // 旧实现只算了水平 offX、offY 算了没用，各截全叠在主段原点附近。
                 const spec = shipSpec({ version: 1, parts: g });
-                // 相对主控的偏移 → 世界坐标
-                const offX = (spec.centerX - SPEC.centerX) * PART_PX;
-                const offY = -(spec.com.y - SPEC.com.y);
+                const offX = prevCom.x - spec.com.x;
+                const offY = prevCom.y - spec.com.y;
                 const a = (rocket.angle - 90) * Math.PI / 180;
-                const wx = rocket.x + offX * Math.cos(a);
-                const wy = rocket.y + offX * Math.sin(a);
+                const wx = rocket.x + offX * Math.cos(a) - offY * Math.sin(a);
+                const wy = rocket.y + offX * Math.sin(a) + offY * Math.cos(a);
                 const v = makeVessel(g, wx, wy, rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
                 vessels.push(v);
                 born.push(v);
