@@ -2089,7 +2089,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         }
 
         // ==== 渲染循环 ====
-        function gameLoop(now) {
+        function gameLoopInner(now) {
             const frameTime = (now - lastTime) / 1000;
             lastTime = now;
 
@@ -2390,6 +2390,17 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 );
             }
 
+        }
+
+        // 渲染循环不能因为一帧的异常整个停摆：记录错误、继续下一帧。
+        // 无头桩测不出真 canvas 的运行时差异，靠 window.__lastGameError 暴露问题。
+        function gameLoop(now) {
+            try {
+                gameLoopInner(now);
+            } catch (e) {
+                console.error('[gameLoop] 本帧出错:', e);
+                window.__lastGameError = e;
+            }
             requestAnimationFrame(gameLoop);
         }
 
