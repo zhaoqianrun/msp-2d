@@ -2034,14 +2034,30 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
             // 相机对准质心 —— 原点在船底，直接跟原点的话大船会偏在屏幕下方看不全
             const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
-            // 跟随系数按真实帧时长换算：旧实现固定 0.15/帧，144Hz 跟太紧、掉帧又太松
-            const camFollow = 1 - Math.exp(-9.75 * Math.min(frameTime, 0.25));
+            // 跟随按「游戏时间」换算：100x 下一帧飞船能位移上千 px，按真实时间
+            // 做指数追赶会永久滞后、把船跟丢。
+            const camFollow = 1 - Math.exp(-9.75 * Math.min(frameTime * timeScale(), 0.25));
             camera.x += (camPt.x - camera.x) * camFollow;
             camera.y += (camPt.y - camera.y) * camFollow;
+            // 兜底：目标离相机超过半个屏幕就硬夹回半屏边缘，任何倍率下船不出画
+            {
+                const maxGap = Math.max(canvasW, canvasH) * 0.5 / camera.zoom;
+                const gxC = camPt.x - camera.x, gyC = camPt.y - camera.y;
+                const gd = Math.hypot(gxC, gyC);
+                if (gd > maxGap) {
+                    const k = (gd - maxGap) / gd;
+                    camera.x += gxC * k;
+                    camera.y += gyC * k;
+                }
+            }
 
             ctx.fillStyle = '#050510';
             ctx.fillRect(0, 0, canvasW, canvasH);
 
+            // ---- 世界层 1：星球本体 + 大气（只做 fill）----
+            // 描边全部移到屏幕空间：world 空间里「px/zoom」的线宽在缩小视野时会
+            // 膨胀成几万 px 宽的描边路径（星球描边 2 万 px、预测虚线 2 万 px 还带
+            // dash），渲染成本随 1/zoom 爆炸 —— 就是「某些缩放奇卡」的元凶。
             ctx.save();
             ctx.translate(canvasW / 2, canvasH / 2);
             ctx.scale(camera.zoom, camera.zoom);
@@ -2052,9 +2068,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
             ctx.fillStyle = '#4a90d9';
             ctx.fill();
-            ctx.strokeStyle = '#2a5f9a';
-            ctx.lineWidth = 2 / camera.zoom;
-            ctx.stroke();
 
             // ---- 大气层：由内到外指数衰减的渐变光晕 ----
             // 大气改成指数模型后，视觉上也跟着来：
@@ -2080,12 +2093,27 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 ctx.fillStyle = atmoGrad;
                 ctx.fill();
 
-                // 参考线：50 km（大气顶），帮助判断「出大气了没」
+            }
+            ctx.restore();   // 世界层 1 结束
+
+            // ---- 屏幕层：描边与预测线（线宽恒定屏幕像素，任意缩放成本恒定）----
+            const psx = (planet.x - camera.x) * camera.zoom + canvasW / 2;
+            const psy = (planet.y - camera.y) * camera.zoom + canvasH / 2;
+            const prs = planet.radius * camera.zoom;
+            if (prs > 8 && prs < 40000) {          // 星球边缘太小看不清/大到出屏时都不描
                 ctx.beginPath();
-                ctx.arc(planet.x, planet.y, planet.radius + atmoThickness(), 0, Math.PI * 2);
+                ctx.arc(psx, psy, prs, 0, Math.PI * 2);
+                ctx.strokeStyle = '#2a5f9a';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            const ars = (planet.radius + atmoThickness()) * camera.zoom;
+            if (ars > 8 && ars < 40000) {          // 参考线：大气顶，帮助判断「出大气了没」
+                ctx.beginPath();
+                ctx.arc(psx, psy, ars, 0, Math.PI * 2);
                 ctx.strokeStyle = 'rgba(120, 190, 255, 0.22)';
-                ctx.lineWidth = 1.2 / camera.zoom;
-                ctx.setLineDash([6 / camera.zoom, 8 / camera.zoom]);
+                ctx.lineWidth = 1.2;
+                ctx.setLineDash([6, 8]);
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
@@ -2096,16 +2124,23 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy,
             }, rocket.state === 'firing' && rocket.throttle > 0 && rocket.fuel > 0, now);
             if (path.length >= 4) {
-                ctx.save();
-                ctx.setLineDash([14 / camera.zoom, 10 / camera.zoom]);  // 除以 zoom：屏幕上看起来一样长
-                ctx.lineWidth = 2 / camera.zoom;
+                const sx = (wx) => (wx - camera.x) * camera.zoom + canvasW / 2;
+                const sy = (wy) => (wy - camera.y) * camera.zoom + canvasH / 2;
+                ctx.setLineDash([14, 10]);
+                ctx.lineWidth = 2;
                 ctx.strokeStyle = 'rgba(120, 220, 255, 0.9)';
                 ctx.beginPath();
-                ctx.moveTo(path[0], path[1]);
-                for (let i = 2; i < path.length; i += 2) ctx.lineTo(path[i], path[i + 1]);
+                ctx.moveTo(sx(path[0]), sy(path[1]));
+                for (let i = 2; i < path.length; i += 2) ctx.lineTo(sx(path[i]), sy(path[i + 1]));
                 ctx.stroke();
-                ctx.restore();
+                ctx.setLineDash([]);
             }
+
+            // ---- 世界层 2：残骸 / 碎片 / 飞船 ----
+            ctx.save();
+            ctx.translate(canvasW / 2, canvasH / 2);
+            ctx.scale(camera.zoom, camera.zoom);
+            ctx.translate(-camera.x, -camera.y);
 
             // ---- 失控的航天器（残骸）：画成暗色的部件块 ----
             for (const v of vessels) {

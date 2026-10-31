@@ -386,6 +386,29 @@ await testAsync('[6938f81] 读档只恢复相机 x/y/zoom，minZoom 不被旧档
     resetToGround();
 });
 
+test('[相机] 100x 加速下相机跟得住：飞船不出半屏', () => {
+    resetToGround();
+    // 直接放进 500km 高的圆轨道（速度 ~2780 px/s，100x 下一帧位移 ~1.2 万 px）
+    const r0 = planet.radius + 500000;
+    const v = Math.sqrt(GRAVITY_MU / r0);
+    t.rocket.x = planet.x;
+    t.rocket.y = planet.y - r0;
+    t.rocket.vx = v;
+    t.rocket.vy = 0;
+    t.rocket.landed = false;
+    t.rocket.state = 'idle';
+    t.camera.x = t.rocket.x;
+    t.camera.y = t.rocket.y;
+    t.camera.zoom = 1;
+    t.timeScaleIdx = 5;      // 100x
+    env.pumpFrames(30);
+    const gap = Math.hypot(t.camera.x - t.rocket.x, t.camera.y - t.rocket.y);
+    const maxGap = 1280 * 0.5 / t.camera.zoom;   // headless 视口 1280
+    assert(gap <= maxGap * 1.05 + 1, '相机-飞船距离 ' + gap.toFixed(0) + 'px 应 ≤ 半屏 ' + maxGap.toFixed(0) + 'px');
+    t.timeScaleIdx = 0;
+    resetToGround();
+});
+
 // ============================================================
 
 console.log('\n==========================================');
