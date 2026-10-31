@@ -11,7 +11,7 @@ import {
 } from './core/constants.js';
 import { fmtDistance, fmtSpeed } from './core/format.js';
 import { planet, GRAVITY_MU, gravityAt, atmosphereDensity, atmoThickness } from './world/planet.js';
-import { predictPath } from './physics/prediction.js';
+import { predictPath, predictPathOrigin } from './physics/prediction.js';
 import { camera } from './render/camera.js';
 import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
          resetToasts, toastQueue, achieved, achievements } from './ui/achievements.js';
@@ -2198,8 +2198,13 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy,
             }, rocket.state === 'firing' && rocket.throttle > 0 && rocket.fuel > 0, now);
             if (path.length >= 4) {
-                const sx = (wx) => (wx - camera.x) * camera.zoom + canvasW / 2;
-                const sy = (wy) => (wy - camera.y) * camera.zoom + canvasH / 2;
+                // 线按「计算时的逻辑位置」生成，船画在「插值渲染位置」（最多落后
+                // 一个物理步）—— 把整条线平移 (渲染船位 - 锚点)，线头才贴着
+                // 画出来的船，否则轨道线会甩在船前面来回游。
+                const po = predictPathOrigin();
+                const oxd = rr.x - po.x, oyd = rr.y - po.y;
+                const sx = (wx) => (wx + oxd - camera.x) * camera.zoom + canvasW / 2;
+                const sy = (wy) => (wy + oyd - camera.y) * camera.zoom + canvasH / 2;
                 ctx.setLineDash([14, 10]);
                 ctx.lineWidth = 2;
                 ctx.strokeStyle = 'rgba(120, 220, 255, 0.9)';

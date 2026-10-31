@@ -222,7 +222,7 @@ test('[shipSpec] 质心随燃料前移（满油 23.74 → 空油 23.33）', () =
 console.log('\n== Phase3 修复回归 ==');
 
 const { GRAVITY_MU } = await import('../../js/world/planet.js');
-const { __debugLastSteps } = await import('../../js/physics/prediction.js');
+const { __debugLastSteps, predictPathOrigin } = await import('../../js/physics/prediction.js');
 
 // 支持异步用例（loadGame 内部走 promise 链）
 async function testAsync(name, fn) {
@@ -406,6 +406,17 @@ test('[输入] 100x 下旋转按真实时间响应：10 帧约 15°，不再一�
     near(Math.abs(d), 15, 3, '10 帧 @100x 应转 ~15°（90°/真实秒，方向随按键）');
     t.timeScaleIdx = 0;
     resetToGround();
+});
+
+test('[预测] 缓存命中时锚点不漂移（渲染平移贴合船的契约）', () => {
+    const a = { x: planet.x + 1000, y: planet.y - (planet.radius + 100000), vx: 2000, vy: 0 };
+    const b = { x: planet.x + 5000, y: planet.y - (planet.radius + 100000), vx: 2000, vy: 0 };
+    t.predictPath(a, true, 80000000);
+    near(predictPathOrigin().x, a.x, 1e-6, '首次计算锚点=计算时位置');
+    t.predictPath(b, true, 80000000 + 30);          // 30ms 内 → 缓存命中
+    near(predictPathOrigin().x, a.x, 1e-6, '缓存命中锚点不应更新为新位置');
+    t.predictPath(b, true, 80000000 + 500);         // 超过自适应间隔 → 重算
+    near(predictPathOrigin().x, b.x, 1e-6, '重算后锚点跟上新状态');
 });
 
 test('[相机] 相机硬锁渲染位置：任何速度/倍率下与画出来的船精确重合', () => {

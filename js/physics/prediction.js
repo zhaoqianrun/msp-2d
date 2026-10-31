@@ -17,7 +17,13 @@ const NUMERIC_INTERVAL_MS = 100;
 const BURN_PREDICT_MAX_STEPS = 30000;   // 点火中预测限幅：≈8 游戏分钟，够看清趋势
 // 重算代价自适应：越贵的重算间隔越长（100ms 下限，400ms 上限），
 // 防止个别很长的轨迹（如大气内跳轨道）每 100ms 咬掉一整帧
-const numericCache = { at: -1e9, points: null, interval: NUMERIC_INTERVAL_MS, lastSteps: 0 };
+const numericCache = { at: -1e9, points: null, interval: NUMERIC_INTERVAL_MS, lastSteps: 0, ox: 0, oy: 0 };
+// 最近一次返回的预测线的「起始逻辑位置」：渲染层把整条线平移
+// (渲染船位 - 锚点)，线头才贴着画出来的船（船画在插值位置，见 main.js）
+const lastOrigin = { x: 0, y: 0 };
+
+// 测试/渲染钩子：当前预测线的锚点
+export function predictPathOrigin() { return { x: lastOrigin.x, y: lastOrigin.y }; }
 
 // 对外入口。s = { x, y, vx, vy }；engineOn = 发动机是否在烧；now = performance.now()
 export function predictPath(s, engineOn, now) {
@@ -31,17 +37,27 @@ export function predictPath(s, engineOn, now) {
     // 真空 + 关机 + 束缚轨道 → 解析椭圆
     if (!engineOn && dens < 0.01 && energy < 0) {
         const pts = conicPoints(s, dx, dy, r);
-        if (pts) return pts;
+        if (pts) {
+            lastOrigin.x = s.x;
+            lastOrigin.y = s.y;
+            return pts;
+        }
     }
 
     // 数值路径节流复用
     if (now - numericCache.at < numericCache.interval && numericCache.points) {
+        lastOrigin.x = numericCache.ox;   // 复用缓存：锚点也是计算时的旧位置
+        lastOrigin.y = numericCache.oy;
         return numericCache.points;
     }
     const t0 = (typeof performance !== 'undefined') ? performance.now() : 0;
+    numericCache.ox = s.x;
+    numericCache.oy = s.y;
     numericCache.points = numericPath(s, engineOn);
     numericCache.at = now;
     if (t0) numericCache.interval = Math.min(400, Math.max(NUMERIC_INTERVAL_MS, (performance.now() - t0) * 8));
+    lastOrigin.x = s.x;
+    lastOrigin.y = s.y;
     return numericCache.points;
 }
 
