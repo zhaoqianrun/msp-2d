@@ -402,6 +402,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         //   总推力   = Σ 发动机推力
         // 燃料烧掉多少，质量就减轻多少 —— 这就是「燃料减少，重量也减少」。
         let SPEC = shipSpec(shipDef);   // 分离/换船后要重算，所以是 let
+        let lastComFuel = -1;           // 上次算质心时的燃料量（变了才重算）
 
         // 质量/推力永远按「现在还活着的部件」实时算（shipInfo 有缓存，开销可忽略）。
         // 以前这里用页面加载时冻结的 DRY_MASS / FUEL_MASS / FULL_THRUST 三个 const：
@@ -990,6 +991,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (main) { main.def = shipDef; main.spec = SPEC; }
             // 满油落地
             rocket.fuel = 1;
+            lastComFuel = -1;
             rocket.throttle = 1;
             rocket.state = 'idle';
             rocket.angle = 90;
@@ -1029,6 +1031,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             invalidateShipCache();
             resetImpactBudget();
             rocket.fuel = 1;
+            lastComFuel = -1;   // 换船后质心必须重算
             rocket.throttle = 1;
             rocket.state = 'idle';
             placeOnSurface();
@@ -1104,6 +1107,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 partTemp = initPartTemp();
                 invalidateShipCache();
                 if (d.rocket && typeof d.rocket === 'object') Object.assign(rocket, d.rocket);
+                lastComFuel = -1;
                 if (d.camera && typeof d.camera === 'object') Object.assign(camera, d.camera);
 
                 // 分离出去、还在惯性飞的残骸
@@ -1206,6 +1210,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     const newCap = g.reduce((s, p) => s + (PART_TYPES[p.type] ? PART_TYPES[p.type].fuel : 0), 0);
                     const oldCap = SPEC.fuelCap || 1;
                     rocket.fuel = Math.max(0, Math.min(1, rocket.fuel * oldCap / Math.max(1e-6, newCap)));
+                    lastComFuel = -1;
                     // 同步更新登记在 vessels 里的主船记录
                     for (const v of vessels) {
                         if (v.id === activeVesselId) {
@@ -1572,6 +1577,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
         // ==== 物理更新 ====
         function physicsStep(dt) {
+            // 输入响应速率按真实时间：高倍时间加速下旋转/油门/加泄油不再被放大
+            // 上百倍（旧实现 100x 下转一圈只要一帧，根本没法控制）。
+            // 物理受力（引力/推力/阻力）仍按游戏时间走。
+            const inputDt = dt / timeScale();
             // ==== 全毁锁定 ====
             // 一个活部件都不剩：船已是空壳。熄火、锁死全部操控，弹一次「任务失败」，
             // 按 R 修复重开。以前这里什么都不做 —— 玩家会开着一艘画不出来的
@@ -1594,8 +1603,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             }
 
             // 旋转放在最前面：停在地上也能先转好方向，再点火起飞
-            if (shipAlive && keys.left) rocket.angle -= ROTATE_SPEED * dt;
-            if (shipAlive && keys.right) rocket.angle += ROTATE_SPEED * dt;
+            if (shipAlive && keys.left) rocket.angle -= ROTATE_SPEED * inputDt;
+            if (shipAlive && keys.right) rocket.angle += ROTATE_SPEED * inputDt;
             rocket.angle = ((rocket.angle % 360) + 360) % 360;
 
             // 缩放：按住 [ / ] 持续缩放（和滚轮、双指捏合同一个 zoomBy）
@@ -1607,20 +1616,20 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
             // 节流阀：按住 ↑/↓ 调油门，按住 Shift 变成微调
             const rate = keys.fine ? THROTTLE_FINE_RATE : THROTTLE_RATE;
-            if (shipAlive && keys.throttleUp) rocket.throttle = Math.min(1, rocket.throttle + rate * dt);
-            if (shipAlive && keys.throttleDown) rocket.throttle = Math.max(0, rocket.throttle - rate * dt);
+            if (shipAlive && keys.throttleUp) rocket.throttle = Math.min(1, rocket.throttle + rate * inputDt);
+            if (shipAlive && keys.throttleDown) rocket.throttle = Math.max(0, rocket.throttle - rate * inputDt);
             if (shipAlive && keys.fine && (keys.throttleUp || keys.throttleDown)) unlock('fine_tune');
 
             // 加油 / 卸油：只能停在星球上的时候做（在空中按只会提醒你）
             if (shipAlive && (keys.refuel || keys.dump)) {
                 if (rocket.landed) {
                     if (keys.refuel) {
-                        rocket.fuel = Math.min(1, rocket.fuel + FUEL_FILL_RATE * dt);
+                        rocket.fuel = Math.min(1, rocket.fuel + FUEL_FILL_RATE * inputDt);
                         if (rocket.fuel >= 1) unlock('refuel_full');
                     }
                     if (keys.dump) {
                         const before = rocket.fuel;
-                        rocket.fuel = Math.max(0, rocket.fuel - FUEL_FILL_RATE * dt);
+                        rocket.fuel = Math.max(0, rocket.fuel - FUEL_FILL_RATE * inputDt);
                         stats.dumpedFuel += before - rocket.fuel;
                         if (stats.dumpedFuel >= 0.5) unlock('dump_half');
                     }
@@ -1791,8 +1800,11 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             }
 
             // 质心随燃料变化：油烧掉，重心会往船头偏（真实火箭也是这样）。
-            // 每帧重算一次（部件不多，开销可以忽略）。
-            SPEC.com = shipCenterOfMass(shipDef, SPEC, rocket.fuel);
+            // 只在燃料真变了时重算 —— 100x 滑行时这里每帧要白跑 260 次。
+            if (rocket.fuel !== lastComFuel) {
+                SPEC.com = shipCenterOfMass(shipDef, SPEC, rocket.fuel);
+                lastComFuel = rocket.fuel;
+            }
 
             // 失控的航天器（惯性飞行，不能操控）
             updateDerelicts(dt);
@@ -2480,6 +2492,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                         return;
                     }
                     Object.assign(rocket, data.rocket);
+                    lastComFuel = -1;
                     // 星球参数只信代码里的：旧存档里的半径是旧比例（50000 / 20000），
                     // 一旦覆盖会把整个世界缩小几十倍，位置也全乱。所以不读存档的 planet。
                     // 相机只取 x/y/zoom：旧存档的 minZoom/maxZoom 会悄悄改掉当前

@@ -14,7 +14,10 @@ import { FIXED_DT, DRAG_COEF } from '../core/constants.js';
 import { planet, GRAVITY_MU, gravityAt, atmosphereDensity } from '../world/planet.js';
 
 const NUMERIC_INTERVAL_MS = 100;
-const numericCache = { at: -1e9, points: null };
+const BURN_PREDICT_MAX_STEPS = 30000;   // 点火中预测限幅：≈8 游戏分钟，够看清趋势
+// 重算代价自适应：越贵的重算间隔越长（100ms 下限，400ms 上限），
+// 防止个别很长的轨迹（如大气内跳轨道）每 100ms 咬掉一整帧
+const numericCache = { at: -1e9, points: null, interval: NUMERIC_INTERVAL_MS, lastSteps: 0 };
 
 // 对外入口。s = { x, y, vx, vy }；engineOn = 发动机是否在烧；now = performance.now()
 export function predictPath(s, engineOn, now) {
@@ -32,13 +35,18 @@ export function predictPath(s, engineOn, now) {
     }
 
     // 数值路径节流复用
-    if (now - numericCache.at < NUMERIC_INTERVAL_MS && numericCache.points) {
+    if (now - numericCache.at < numericCache.interval && numericCache.points) {
         return numericCache.points;
     }
+    const t0 = (typeof performance !== 'undefined') ? performance.now() : 0;
+    numericCache.points = numericPath(s, engineOn);
     numericCache.at = now;
-    numericCache.points = numericPath(s);
+    if (t0) numericCache.interval = Math.min(400, Math.max(NUMERIC_INTERVAL_MS, (performance.now() - t0) * 8));
     return numericCache.points;
 }
+
+// 测试钩子：上次数值路径实际积分了多少步
+export function __debugLastSteps() { return numericCache.lastSteps; }
 
 // ---- 画法一：解析椭圆 ----
 // 由状态向量直接算轨道根数（半通径 p、偏心率 e、近点角方向 ω），
@@ -121,12 +129,12 @@ function predictShouldStop(s, sweep, i, hitMargin) {
 // 粗测要画多远：步长放大 8 倍换 8 倍速度，只用来估计长度；
 // 正式画线的第二遍自己会精确撞上停止条件，粗测偏差无所谓。
 // （旧实现探测用全精度步长，绕轨时探测一遍就要 30 万步。）
-function predictProbeSteps(s) {
+function predictProbeSteps(s, maxSteps) {
     const PROBE_DT = FIXED_DT * 8;
     const t = { x: s.x, y: s.y, vx: s.vx, vy: s.vy };
     let sweep = 0;
     let prevAng = Math.atan2(t.y - planet.y, t.x - planet.x);
-    const LIMIT = 100000;                          // ×8 步长 ≈ 80 万原步
+    const LIMIT = Math.min(100000, Math.ceil(maxSteps / 8));   // ×8 步长 ≈ 80 万原步
     for (let i = 1; i <= LIMIT; i++) {
         predictStep(t, PROBE_DT);
         const ang = Math.atan2(t.y - planet.y, t.x - planet.x);
@@ -140,15 +148,21 @@ function predictProbeSteps(s) {
     return LIMIT * 8;
 }
 
-function numericPath(s) {
+function numericPath(s, engineOn) {
+    // 点火中的轨迹本来就在持续变化，画满一整圈毫无意义还巨贵
+    // （近轨道椭圆一圈约 40 万步 = 每 100ms 冻结一帧）—— 限幅后几毫秒就算完，
+    // 熄火后解析椭圆接管画全程。
+    const maxSteps = engineOn ? BURN_PREDICT_MAX_STEPS : Infinity;
     let totalSteps;
     try {
-        totalSteps = predictProbeSteps(s);
+        totalSteps = predictProbeSteps(s, maxSteps);
     } catch (e) {
         totalSteps = 3000;
     }
     // 至少画 5 秒，免得静止时线太短看不见
     totalSteps = Math.max(totalSteps, 5 / FIXED_DT);
+    totalSteps = Math.min(totalSteps, maxSteps);
+    numericCache.lastSteps = totalSteps;
 
     const TARGET_POINTS = 600;
     const sample = Math.max(1, Math.round(totalSteps / TARGET_POINTS));

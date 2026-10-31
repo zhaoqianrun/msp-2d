@@ -222,6 +222,7 @@ test('[shipSpec] 质心随燃料前移（满油 23.74 → 空油 23.33）', () =
 console.log('\n== Phase3 修复回归 ==');
 
 const { GRAVITY_MU } = await import('../../js/world/planet.js');
+const { __debugLastSteps } = await import('../../js/physics/prediction.js');
 
 // 支持异步用例（loadGame 内部走 promise 链）
 async function testAsync(name, fn) {
@@ -383,6 +384,27 @@ await testAsync('[6938f81] 读档只恢复相机 x/y/zoom，minZoom 不被旧档
     near(t.camera.zoom, 0.5, 1e-9, '缩放');
     assert(t.camera.minZoom === 0.0001, 'minZoom 不应被存档覆盖, got ' + t.camera.minZoom);
     assert(t.camera.maxZoom === 12, 'maxZoom 不应被存档覆盖');
+    resetToGround();
+});
+
+test('[预测] 点火中预测限幅：近轨道椭圆不再全圈积分（上升段顿挫元凶）', () => {
+    // 500km 高、0.9 倍圆轨道速度 → 椭圆一圈约 40 万步；点火中必须被限到 3 万步内
+    const r0 = planet.radius + 500000;
+    const v = Math.sqrt(GRAVITY_MU / r0) * 0.9;
+    t.predictPath({ x: planet.x, y: planet.y - r0, vx: v, vy: 0 }, true, 60000000);
+    assert(__debugLastSteps() <= 30000, '点火中应限幅 3 万步, got ' + __debugLastSteps());
+});
+
+test('[输入] 100x 下旋转按真实时间响应：10 帧约 15°，不再一帧转一圈', () => {
+    resetToGround();
+    t.timeScaleIdx = 5;      // 100x
+    const a0 = t.rocket.angle;
+    t.keys.left = true;
+    env.pumpFrames(10);
+    t.keys.left = false;
+    const d = t.rocket.angle - a0;
+    near(Math.abs(d), 15, 3, '10 帧 @100x 应转 ~15°（90°/真实秒，方向随按键）');
+    t.timeScaleIdx = 0;
     resetToGround();
 });
 
