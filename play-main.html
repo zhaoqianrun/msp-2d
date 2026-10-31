@@ -1718,6 +1718,29 @@
             saveMission();   // 把「修好的新一局」写进本地任务存档
         }
 
+        // ==================== 换船唯一入口 ====================
+        // 不管新船来自本地、任务存档还是服务器，都必须走这一个函数换：
+        // shipDef / SPEC / 血量表 / 温度表 / 已毁集合 / 撞击配额 要一起重建。
+        // 少换任何一个，就会出现「旧船碰撞箱 + 新船部件」的缝合船：
+        // 部件血量查不到 id 变 NaN（撞击永远免疫）、渲染错位、质心错、开局即毁。
+        function setShipDef(def) {
+            shipDef = def;
+            pristineShip = JSON.parse(JSON.stringify(def));   // 重置（R）时回到这艘
+            SPEC = shipSpec(shipDef);
+            destroyed = new Set();
+            partHP = initPartHP();
+            partTemp = initPartTemp();
+            invalidateShipCache();
+            resetImpactBudget();
+            rocket.fuel = 1;
+            rocket.throttle = 1;
+            rocket.state = 'idle';
+            placeOnSurface();
+            const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
+            camera.x = camPt.x;
+            camera.y = camPt.y;
+        }
+
         // ==================== 本局任务自动存档 ====================
         // 目的：把「当前飞船（含已炸掉的部件、耐久、分离出的残骸、位置）」存到浏览器本地。
         // 以前这些只在内存里 —— 页面一刷新、或从观察站点「进入」重开页面就全没了，
@@ -3126,7 +3149,8 @@
         // 如果服务器上有造船厂存的飞船，就用它（手机造的船电脑也能飞）
         (async function loadShipFromServer() {
             try {
-                const r = await fetch('/api/ship');
+                // 带 cid：让服务器知道这是哪个端，而不是折叠成一个 anon-IP 幽灵端
+                const r = await fetch(apiUrl('/api/ship'));
                 const d = await r.json();
                 if (!d || !d.ship || !Array.isArray(d.ship.parts) || d.ship.parts.length === 0) return;
                 const parts = d.ship.parts.filter(p => p && PART_TYPES[p.type]);
@@ -3136,15 +3160,13 @@
                 if (missionRestored && shipPartsSig(parts) === missionSig) return;
                 // 换了一艘船（或在造船厂造了新的搭配）—— 旧任务作废
                 clearMission();
-                shipDef = { version: 1, name: d.ship.name || '无名', parts };
-                pristineShip = JSON.parse(JSON.stringify(shipDef));   // 重置时回到这艘
-                invalidateShipCache();
+                // 走唯一入口换船：SPEC / 血量表 / 温度表 / 已毁集合全部按新船重建，
+                // 再把新船摆回地面。（以前只换了 shipDef，SPEC 还是旧船的 —— 缝合船。）
+                setShipDef({ version: 1, name: d.ship.name || '无名', parts });
                 try { localStorage.setItem('msp2d-ship', JSON.stringify(shipDef)); } catch (e) {}
-                const spec = shipSpec(shipDef);
-                // 提示一下换了船，顺便把飞船摆到新船的表面上
                 toastQueue.push({
                     name: shipDef.name,
-                    desc: `控制舱 ${parts.filter(p=>p.type==='capsule').length}　燃料箱 ${parts.filter(p=>p.type==='tank').length}　发动机 ${parts.filter(p=>p.type==='engine').length}　质量 ${spec.dryMass + spec.fuelCap}`,
+                    desc: `控制舱 ${parts.filter(p=>p.type==='capsule').length}　燃料箱 ${parts.filter(p=>p.type==='tank').length}　发动机 ${parts.filter(p=>p.type==='engine').length}　质量 ${SPEC.dryMass + SPEC.fuelCap}`,
                     title: '飞 船 已 装 载'
                 });
             } catch (e) { /* 没服务器就用本地的 */ }
