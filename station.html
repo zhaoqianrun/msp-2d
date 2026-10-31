@@ -122,6 +122,11 @@ try {
 let serverUp = false;
 let world = null;
 
+// 船名/部件名来自服务器（源头是造船厂的输入框），拼进 innerHTML 前必须转义
+function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 // 从服务器拿实时状态。
 // 关键：要记住上次拿到的版本号（rev），只请求变化的部分。
 // 之前每次都传 since=0，服务器在「版本没变」时只回 {changed:false} 不带数据，
@@ -138,8 +143,16 @@ async function poll() {
         if (d && d.changed && d.world) {
             world = d.world;
             lastRev = d.rev;
-        } else if (typeof d.rev === 'number' && d.rev > lastRev) {
-            lastRev = d.rev;
+        } else if (typeof d.rev === 'number') {
+            if (d.rev < lastRev) {
+                // 服务器重启过（rev 归零）：清掉上一轮会话的残影，
+                // 不然页面会一直显示旧世界还标着「数据实时」
+                lastRev = 0;
+                world = null;
+                lastRenderKey = '';
+            } else if (d.rev > lastRev) {
+                lastRev = d.rev;
+            }
         }
     } catch (e) {
         serverUp = false;
@@ -220,10 +233,11 @@ function render() {
 
     list.innerHTML = items.map((it, idx) => {
         const r = it.rocket;
+        // 部件名可能来自服务器数据，同样要转义
         const partsHtml = it.parts
             ? it.parts.map(p => {
                 const t = PART_TYPES[p.type];
-                const nm = t ? t.name : p.type;
+                const nm = esc(t ? t.name : p.type);
                 return p.alive ? `<span class="ok">${nm}</span>` : `<span class="gone">${nm}</span>`;
             }).join(' · ')
             : '（无部件数据）';
@@ -252,14 +266,18 @@ function render() {
             body = '<div><span class="k">状态</span>本地存档（服务器未运行，看不到实时位置）</div>';
         }
 
+        // 按钮说实话：接管残骸的功能还没实装（play-main 不读 ?vessel= 参数），
+        // 与其放一个点开发现进的还是主船的按钮，不如明确告诉玩家暂不支持
         const canEnter = !it.offline && it.hasCapsule && !it.derelict && !allDead;
         const act = it.offline
             ? '<button class="tbtn" onclick="location.href=\'build.html\'">去造船厂</button>'
-            : `<button class="tbtn ${canEnter ? 'go' : ''}" onclick="enterVessel(${idx})">${allDead ? '已损毁' : (canEnter ? '进入并操控' : '进入（只读）')}</button>`;
+            : (canEnter
+                ? `<button class="tbtn go" onclick="enterVessel(${idx})">进入并操控</button>`
+                : '<button class="tbtn" disabled style="opacity:.45;cursor:not-allowed" title="接管残骸暂未实装，游戏目前只能操控带控制舱的主船">暂不能接管</button>');
 
         return `<div class="vessel ${it.derelict ? 'derelict' : ''} ${it.main ? 'active' : ''}">
             <div class="vhead">
-                <span class="vname">${it.name}</span>
+                <span class="vname">${esc(it.name)}</span>
                 ${tags.join('')}
             </div>
             <div class="vbody">${body}</div>

@@ -568,15 +568,14 @@ function addPart(type, gx, gy) {
     const t = PART_TYPES[type];
     pushHistory();
     ship.parts.push({ id: 'p' + Date.now() + Math.floor(Math.random() * 1000), type, x: gx, y: gy });
-    // 镜像：把落在中轴右侧的部件在左侧复制一份
-    if (mirror && gx > 0) {
+    // 镜像：把落在中轴一侧的部件在另一侧复制一份。
+    // 注意镜像件也要吃 MAX_PARTS 上限 —— 59 个部件时放一个，镜像再塞一个
+    // 就变 61 个，validateShip 直接判超限，船连试飞都点不了。
+    if (mirror && gx !== 0) {
         const mx = -gx - t.w;
-        if (canPlace(type, mx, gy, null)) {
-            ship.parts.push({ id: 'p' + Date.now() + Math.floor(Math.random() * 1000) + 'm', type, x: mx, y: gy });
-        }
-    } else if (mirror && gx < 0) {
-        const mx = -gx - t.w;
-        if (canPlace(type, mx, gy, null)) {
+        if (ship.parts.length >= MAX_PARTS) {
+            toast(`部件已到 ${MAX_PARTS} 上限，镜像件没有生成`);
+        } else if (canPlace(type, mx, gy, null)) {
             ship.parts.push({ id: 'p' + Date.now() + Math.floor(Math.random() * 1000) + 'm', type, x: mx, y: gy });
         }
     }
@@ -661,6 +660,7 @@ canvas.addEventListener('pointermove', (e) => {
         const gx = Math.round((pos.x - dragOffset.x - origin.x) / GRID);
         const gy = Math.round((origin.y - (pos.y - dragOffset.y) - t.h * GRID) / GRID);
         if (gx !== dragging.x || gy !== dragging.y) {
+            if (!dragMoved) pushHistory();   // 一次拖动只记一步：Ctrl+Z 回到拖动前（旧实现拖动不进栈，撤销会错乱）
             dragMoved = true;
             if (canPlace(dragging.type, gx, gy, dragging.id)) {
                 dragging.x = gx; dragging.y = gy;
@@ -805,7 +805,7 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selected) { e.preventDefault(); removePart(selected); }
     }
-    if (e.key === 'Escape') { placing = null; ghost = null; selected = null; draw(); }
+    if (e.key === 'Escape') { clearPlacing(); selected = null; draw(); }   // 旧实现没清卡片高亮，看着还像在放置模式
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         document.getElementById('btn-undo').click();

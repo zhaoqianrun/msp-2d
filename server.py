@@ -24,7 +24,6 @@ STATE_FILE = os.path.join(BASE_DIR, "shared-state.json")
 CLIENTS_FILE = os.path.join(BASE_DIR, "clients.json")
 
 CLIENT_TIMEOUT = 15        # 超过这么久没心跳，就算这个端掉线了
-CONTROL_TIMEOUT = 8        # 操控端超过这么久没上报，就认为操控断了
 
 STATE_LOCK = threading.Lock()
 FILE_LOCK = threading.Lock()      # 存档/飞船文件的写锁：并发保存不能写同一个 .tmp
