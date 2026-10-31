@@ -11,6 +11,7 @@ import {
 } from './core/constants.js';
 import { fmtDistance, fmtSpeed } from './core/format.js';
 import { planet, GRAVITY_MU, gravityAt, atmosphereDensity, atmoThickness } from './world/planet.js';
+import { predictPath } from './physics/prediction.js';
 import { camera } from './render/camera.js';
 import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
          toastQueue, achieved, achievements } from './ui/achievements.js';
@@ -1807,132 +1808,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             checkAchievements(dt);
         }
 
-        // ==== 轨道预测线（虚线）====
-        // 拿“当前位置 + 当前速度 + 当前发动机状态”往前算，画出未来的飞行轨迹。
-        // 一直绕着星球转 = 你入轨了；一头扎进星球 = 你会掉下去。
-        // 预测时长。这里的关键认知：
-        //   本星球轨道周期长达 7000 秒（引力只有 0.98 m/s²，但绕一圈 6000+ km）
-        //   所以**没有**一个「固定秒数」能既不过长、又能画完一整圈。
-        //
-        // 正确做法：给一个足够长的上限，然后靠「撞地 / 绕完一圈」提前收工。
-        //   低空飞行   -> 几十秒就撞地，线自然很短
-        //   入轨飞行   -> 一直画到绕完一圈（可能上千秒）
-        //   逃逸飞行   -> 画到飞出边界
-        const PREDICT_SECONDS = 4000;
-        const PREDICT_MAX_STEPS = PREDICT_SECONDS / FIXED_DT;
-        const PREDICT_SAMPLE = 12;
-
-        // 单步推进：给一组状态，往前走一步（引力和物理里完全一致的引力 + 阻力）
-        function predictStep(s) {
-            const g = gravityAt(s.x, s.y);
-            s.vx += g.ax * FIXED_DT;
-            s.vy += g.ay * FIXED_DT;
-            const dens = atmosphereDensity(s.x, s.y);
-            if (dens > 0) {
-                const sp = Math.hypot(s.vx, s.vy);
-                if (sp > 1) {
-                    const drag = DRAG_COEF * dens * sp * sp;
-                    s.vx -= (s.vx / sp) * drag * FIXED_DT;
-                    s.vy -= (s.vy / sp) * drag * FIXED_DT;
-                }
-            }
-            s.x += s.vx * FIXED_DT;
-            s.y += s.vy * FIXED_DT;
-        }
-
-        // 判断这一步之后该不该收工
-        function predictShouldStop(s, sweep, i) {
-            const d = Math.hypot(s.x - planet.x, s.y - planet.y);
-            if (d < planet.radius + planet.radius * 0.002) return 'hit';    // 撞地
-            if (d > planet.radius * 3) return 'far';                        // 太远
-            if (i > 600 && Math.abs(sweep) >= Math.PI * 2) return 'orbit';  // 绕完一圈
-            return null;
-        }
-
-        // 沿轨道推进，返回「需要多少步才能收工」
-        // 用大步长快速估算，避免真的跑几万步
-        function predictProbeSteps() {
-            const s = { x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy };
-            let sweep = 0;
-            let prevAng = Math.atan2(s.y - planet.y, s.x - planet.x);
-            // 粗算步长。轨道周期长达 7000+ 秒（42 万步），
-            // 用 8 太细（探测本身要 6 万次迭代），用 30 够判断「要不要绕圈」。
-            const COARSE = 30;
-            const LIMIT = 800000;  // 最多探测 80 万步（约 3.7 小时）
-            for (let i = 0; i < LIMIT; i += COARSE) {
-                for (let k = 0; k < COARSE; k++) predictStep(s);
-                const ang = Math.atan2(s.y - planet.y, s.x - planet.x);
-                let da = ang - prevAng;
-                while (da > Math.PI) da -= 2 * Math.PI;
-                while (da < -Math.PI) da += 2 * Math.PI;
-                sweep += da;
-                prevAng = ang;
-                if (predictShouldStop(s, sweep, i)) return i + COARSE;
-            }
-            return LIMIT;
-        }
-
-        function predictPath() {
-            // ---- 第一遍：探路，看要跑多久 ----
-            let totalSteps;
-            try {
-                totalSteps = predictProbeSteps();
-            } catch (e) {
-                totalSteps = 3000;
-            }
-            // 至少画 5 秒，免得静止时线太短看不见
-            totalSteps = Math.max(totalSteps, 5 / FIXED_DT);
-
-            // ---- 第二遍：按需要的时长决定采样密度 ----
-            // 目标点数。绕一整圈时线很长，320 点在屏幕上会显得有棱角，
-            // 但也不能太多（渲染负担）。600 是个平衡点。
-            const TARGET_POINTS = 600;
-            const sample = Math.max(1, Math.round(totalSteps / TARGET_POINTS));
-
-            let px = rocket.x, py = rocket.y;
-            let pvx = rocket.vx, pvy = rocket.vy;
-            const points = [px, py];
-
-            let sweep = 0;   // 已经绕星球转过的角度
-            let prevAng = Math.atan2(py - planet.y, px - planet.x);
-
-            for (let i = 0; i < totalSteps; i++) {
-                // 引力
-                const g = gravityAt(px, py);
-                pvx += g.ax * FIXED_DT;
-                pvy += g.ay * FIXED_DT;
-
-                // 大气阻力 —— 关键！之前预测里没有阻力，
-                // 所以在大气内飞的时候，虚线会明显偏离实际轨迹（预测得太远）。
-                // 现在和 physicsStep 用同一套力，虚线和实际就能对上了。
-                const pdens = atmosphereDensity(px, py);
-                if (pdens > 0) {
-                    const psp = Math.hypot(pvx, pvy);
-                    if (psp > 1) {
-                        const pdrag = DRAG_COEF * pdens * psp * psp;
-                        pvx -= (pvx / psp) * pdrag * FIXED_DT;
-                        pvy -= (pvy / psp) * pdrag * FIXED_DT;
-                    }
-                }
-
-                px += pvx * FIXED_DT;
-                py += pvy * FIXED_DT;
-
-                if (i % sample === 0) points.push(px, py);
-
-                const ang = Math.atan2(py - planet.y, px - planet.x);
-                let da = ang - prevAng;
-                while (da > Math.PI) da -= 2 * Math.PI;
-                while (da < -Math.PI) da += 2 * Math.PI;
-                sweep += da;
-                prevAng = ang;
-
-                if (predictShouldStop({ x: px, y: py }, sweep, i)) break;
-            }
-            points.push(px, py);   // 收笔时补一个点，线头才准
-            return points;
-        }
-
         // ==================== 画飞船（按部件逐块绘制）====================
         // 船的坐标：以「最底下那条边」为 y=0，向上为正，和造船厂一致。
         // 绘制时把中轴对齐到 rocket 的位置，所以船怎么摆都转得对。
@@ -2196,8 +2071,11 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 ctx.setLineDash([]);
             }
 
-            // 轨道预测线（蓝色虚线，像 SFS 里那条线）
-            const path = predictPath();
+            // 轨道预测线（蓝色虚线，像 SFS 里那条线）。
+            // 语义是「假设此刻关机滑行」：稳定绕轨走解析椭圆，点火/再入走数值积分。
+            const path = predictPath({
+                x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy,
+            }, rocket.state === 'firing' && rocket.throttle > 0 && rocket.fuel > 0, now);
             if (path.length >= 4) {
                 ctx.save();
                 ctx.setLineDash([14 / camera.zoom, 10 / camera.zoom]);  // 除以 zoom：屏幕上看起来一样长
@@ -2615,7 +2493,9 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             get mainView() { return mainView; },
             get toastQueue() { return toastQueue; },
             get achieved() { return achieved; },
+            get timeScaleIdx() { return timeScaleIdx; },
             shipInfo, shipMass, thrustAccel, shipSpec, gravityAt, atmosphereDensity,
             setShipDef, placeOnSurface, applyImpact, splitVessel, checkSeparation,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
+            onKeyDown, blowUpPart, predictPath,
         };
