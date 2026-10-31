@@ -419,6 +419,27 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         }
 
         // 找出离星球中心最近的那个碰撞点（也就是"最低"的那个）
+        // ==================== 着陆姿态 ====================
+        // 机头偏离「星球正上方」的角度（度）
+        //   0   = 完全竖直（正常着陆）
+        //   55+ = 横躺 / 倒扣，不该算正常着陆
+        function shipTiltDeg(angleDeg) {
+            // 飞船角度约定：90° = 机头朝上（游戏里默认的竖直状态）
+            // 用和渲染同一套换算：rotate((angle - 90) * PI/180)
+            const a = (angleDeg - 90) * Math.PI / 180;
+            // 机头方向在本地是 (0, -1)，旋转后：
+            const noseX = Math.sin(a);
+            const noseY = -Math.cos(a);
+            // 星球在飞船的哪个方向 -> 反方向就是「天空」
+            const dxG = planet.x - rocket.x;
+            const dyG = planet.y - rocket.y;
+            const len = Math.hypot(dxG, dyG) || 1;
+            const upX = -dxG / len;
+            const upY = -dyG / len;
+            const dot = Math.max(-1, Math.min(1, noseX * upX + noseY * upY));
+            return Math.acos(dot) * 180 / Math.PI;
+        }
+
         function lowestCollisionPoint(angleDeg) {
             let best = null, bestD = Infinity;
             for (const p of SPEC.corners) {
@@ -1824,41 +1845,97 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     if (blew > 0) checkSeparation();
                 }
 
-                // 摔得狠、而且发动机没在推 → 弹一下，把大部分能量吃掉。
-                // 但如果你正点火往地里顶，就直接停住 —— 不然会一直弹个没完，永远落不下来。
-                if (intoGround > LANDING_SPEED && rocket.state !== 'firing') {
-                    // 摔得太狠：弹一下，大部分能量被吃掉
-                    rocket.vx = slideX * 0.8 - intoGround * 0.2 * nx;
-                    rocket.vy = slideY * 0.8 - intoGround * 0.2 * ny;
-                    rocket.landed = false;
+                // ---- 姿态警告：一碰地就检查，不用等停稳 ----
+                {
+                    const tiltHit = shipTiltDeg(rocket.angle);
+                    if (tiltHit > 55 && intoGround > 1.5) {
+                        if (!rocket._tiltNotified || Date.now() - rocket._tiltNotified > 4000) {
+                            rocket._tiltNotified = Date.now();
+                            toastQueue.push({
+                                title: '姿 态 不 正',
+                                name: '飞船横着砸到地上了',
+                                desc: '倾角 ' + Math.round(tiltHit) + '°，要机头朝上才能稳稳着陆',
+                            });
+                        }
+                    }
+                }
+
+                if (intoGround > 2 && rocket.state !== 'firing') {
+                    // 只要砸到地上就弹一下（以前要 >180 才弹，10~30 的速度
+                    // 直接被判成「稳稳停住」，看起来就是瞬间停）。
+                    // 恢复系数随速度增长：
+                    //   10 → 弹起 0.9 （轻微一跳）  30 → 弹起 4.5（明显一跳）
+                    //  150 → 弹起 67 （摔得狠弹得高）
+                    const restitution = Math.min(0.45, 0.06 + intoGround * 0.003);
+                    // 姿态越歪弹得越猛（不是用「脚」着地）
+                    const tiltB = shipTiltDeg(rocket.angle);
+                    const tiltFactor = 1 + (tiltB / 90) * 1.5;
+                    const bounce = intoGround * restitution * tiltFactor;
+
+                    rocket.vx = slideX * GROUND_FRICTION - bounce * nx;
+                    rocket.vy = slideY * GROUND_FRICTION - bounce * ny;
+
+                    // 弹起来一点就别算着陆
+                    if (bounce > 0.5) rocket.landed = false;
                 } else {
                     // 没点火、稳稳停在地上：扎向地面的速度归零，
                     // 贴着地面滑的速度被摩擦慢慢磨掉，但"向外飞"的速度要留着
                     // —— 不然停在星球上就再也起不来了。
-                    // 「向外飞」的速度原样保留（起飞靠它，不能被摩擦吃掉）；
-                    // 「贴着地面滑」的速度才吃摩擦。
                     const outSpeed = Math.max(0, -intoGround);
                     rocket.vx = slideX * GROUND_FRICTION - outSpeed * nx;
                     rocket.vy = slideY * GROUND_FRICTION - outSpeed * ny;
 
                     if (!rocket.landed) {
-                        rocket.landed = true;
-                        // 落地自动关机，等着按 E 重新起飞
-                        if (rocket.state === 'firing') rocket.state = 'idle';
+                        // ---- 姿态判定 ----
+                        // 机头偏离竖直方向多少度：0 = 完全竖直（正常着陆）
+                        //                       >55 = 横躺/倒扣，不算正常着陆
+                        const tilt = shipTiltDeg(rocket.angle);
 
-                        // ---- 着陆相关的成就 ----
-                        if (intoGround < 20) unlock('soft_landing');    // 轻轻落下
-                        if (intoGround < 5) unlock('no_scratch');       // 毫发无伤
-                        if (alivePartCount() < shipDef.parts.length / 2) unlock('survive_wreck');  // 残骸归来
-                        if (rocket.fuel < 0.05) unlock('low_fuel_land');// 快没油了还能落回来
-                        if (stats.escaped) unlock('homing_cat');        // 飞出去又自己回来了
-                        if (Math.hypot(rocket.x - stats.launchX, rocket.y - stats.launchY) > 3000) {
-                            unlock('round_trip');                       // 落点离起飞点很远
+                        if (tilt > 55) {
+                            // 横着 / 倒扣着砸下来 —— 不是正常着陆，损失大部分能量
+                            rocket.vx = slideX * 0.25;
+                            rocket.vy = slideY * 0.25;
+                            if (Math.hypot(rocket.vx, rocket.vy) > 2.5) {
+                                rocket.landed = false;      // 还在滚
+                            } else {
+                                rocket.landed = true;
+                                if (rocket.state === 'firing') rocket.state = 'idle';
+                            }
+                            if (!rocket._tiltNotified || Date.now() - rocket._tiltNotified > 4000) {
+                                rocket._tiltNotified = Date.now();
+                                toastQueue.push({
+                                    title: '姿 态 不 正',
+                                    name: '飞船横着砸到地上了',
+                                    desc: '倾角 ' + Math.round(tilt) + '°，要机头朝上才能稳稳着陆',
+                                });
+                            }
+                        } else {
+                            // 正常着陆（倾角 <= 55°）
+                            rocket.landed = true;
+                            if (rocket.state === 'firing') rocket.state = 'idle';
+
+                            // ---- 着陆成就（倾角越大越严格）----
+                            if (tilt < 30) {
+                                if (intoGround < 20) unlock('soft_landing');    // 轻轻落下
+                                if (intoGround < 5) unlock('no_scratch');       // 毫发无伤
+                            } else if (intoGround < 20) {
+                                toastQueue.push({
+                                    title: '勉 强 着 陆',
+                                    name: '倾角 ' + Math.round(tilt) + '°',
+                                    desc: '机头没朝上，下次注意姿态',
+                                });
+                            }
+                            if (alivePartCount() < shipDef.parts.length / 2) unlock('survive_wreck');  // 残骸归来
+                            if (rocket.fuel < 0.05) unlock('low_fuel_land');// 快没油了还能落回来
+                            if (stats.escaped) unlock('homing_cat');        // 飞出去又自己回来了
+                            if (Math.hypot(rocket.x - stats.launchX, rocket.y - stats.launchY) > 3000) {
+                                unlock('round_trip');                       // 落点离起飞点很远
+                            }
+                            stats.escaped = false;
+
+                            // 着陆结算：这一趟任务里拿到的成就一次性揭晓
+                            settleMission();
                         }
-                        stats.escaped = false;
-
-                        // 着陆结算：这一趟任务里拿到的成就一次性揭晓
-                        settleMission();
                     }
                 }
             } else {
