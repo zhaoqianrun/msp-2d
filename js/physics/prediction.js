@@ -66,14 +66,27 @@ function conicPoints(s, dx, dy, r) {
     const dir = h > 0 ? 1 : -1;                    // 顺/逆时针
     const N = 360;
     const points = [];
+    let prevNu = nu0;
 
     for (let i = 0; i <= N; i++) {
         const nu = nu0 + dir * (i / N) * Math.PI * 2;
         const rr = p / (1 + e * Math.cos(nu));
-        if (rr < planet.radius) break;             // 撞地：和数值画法同语义
+        if (rr < planet.radius) {
+            // 掠地时 1° 采样一跨就是几十公里：二分逼近地表穿越点，线头贴准地面
+            let lo = prevNu, hi = nu;
+            for (let k = 0; k < 24; k++) {
+                const mid = (lo + hi) / 2;
+                if (p / (1 + e * Math.cos(mid)) < planet.radius) hi = mid; else lo = mid;
+            }
+            const rrHit = p / (1 + e * Math.cos(lo));
+            const angHit = omega + lo;
+            points.push(planet.x + rrHit * Math.cos(angHit), planet.y + rrHit * Math.sin(angHit));
+            break;
+        }
         if (rr > planet.radius * 3) break;         // 远离：同 'far'
         const ang = omega + nu;
         points.push(planet.x + rr * Math.cos(ang), planet.y + rr * Math.sin(ang));
+        prevNu = nu;
     }
     return points.length >= 4 ? points : null;
 }

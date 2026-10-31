@@ -14,7 +14,7 @@ import { planet, GRAVITY_MU, gravityAt, atmosphereDensity, atmoThickness } from 
 import { predictPath } from './physics/prediction.js';
 import { camera } from './render/camera.js';
 import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
-         toastQueue, achieved, achievements } from './ui/achievements.js';
+         resetToasts, toastQueue, achieved, achievements } from './ui/achievements.js';
 
 
         const canvas = document.getElementById('game');
@@ -1180,14 +1180,28 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             }
 
             const born = [];
-            // 主段会在循环中途替换 SPEC，先存住「分离前整船的质心」给摆放公式用
+            // 主段会在循环中途替换 SPEC、挪动 rocket，先存住「分离前整船」的
+            // 质心 / 中轴 / 底面 / 原点，给摆放公式用
             const prevCom = { x: SPEC.com.x, y: SPEC.com.y };
+            const oldCx = SPEC.centerX;
+            const oldMaxY = SPEC.box.maxY;
+            const originX = rocket.x, originY = rocket.y;
             groups.forEach((g, i) => {
                 if (i === mainIdx) {
                     // 主控那截：留在 rocket 里继续用
                     shipDef = { version: 1, name: shipDef.name, parts: g };
                     SPEC = shipSpec(shipDef);
                     invalidateShipCache();
+                    // 锚点跟着新质心挪，主段部件才不会跳位（推导同下方 born 分支）
+                    {
+                        const dXm = (SPEC.centerX - oldCx) * PART_PX;
+                        const dYm = (oldMaxY - SPEC.box.maxY) * PART_PX;
+                        const oXm = SPEC.com.x - prevCom.x + dXm;
+                        const oYm = SPEC.com.y - prevCom.y + dYm;
+                        const am = (rocket.angle - 90) * Math.PI / 180;
+                        rocket.x += oXm * Math.cos(am) - oYm * Math.sin(am);
+                        rocket.y += oXm * Math.sin(am) + oYm * Math.cos(am);
+                    }
                     // 燃料容量变了：油量按「占新容量的比例」重新归一
                     const newCap = g.reduce((s, p) => s + (PART_TYPES[p.type] ? PART_TYPES[p.type].fuel : 0), 0);
                     const oldCap = SPEC.fuelCap || 1;
@@ -1202,15 +1216,20 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     return;
                 }
                 // 其它截：变成失控的航天器。
-                // 摆放公式：新船原点 = 旧船原点 + 旋转(旧质心 - 新质心)。
-                // 这样分离瞬间每个部件的世界位置和分离前一模一样 ——
+                // 摆放公式：要求分离瞬间每个部件的世界位置不变 ——
+                //   v + R(l' - com2) = origin + R(l - prevCom)，其中 l' = l - (Δx,Δy)，
+                //   Δx = (cx新 - cx老)·P，Δy = (maxY老 - maxY新)·P（同一部件在两套
+                //   本地坐标里的差，对整组恒定）。解出
+                //   v = origin + R( com2 - prevCom + (Δx, Δy) )。
                 // 旧实现只算了水平 offX、offY 算了没用，各截全叠在主段原点附近。
                 const spec = shipSpec({ version: 1, parts: g });
-                const offX = prevCom.x - spec.com.x;
-                const offY = prevCom.y - spec.com.y;
+                const dX = (spec.centerX - oldCx) * PART_PX;
+                const dY = (oldMaxY - spec.box.maxY) * PART_PX;
+                const offX = spec.com.x - prevCom.x + dX;
+                const offY = spec.com.y - prevCom.y + dY;
                 const a = (rocket.angle - 90) * Math.PI / 180;
-                const wx = rocket.x + offX * Math.cos(a) - offY * Math.sin(a);
-                const wy = rocket.y + offX * Math.sin(a) + offY * Math.cos(a);
+                const wx = originX + offX * Math.cos(a) - offY * Math.sin(a);
+                const wy = originY + offX * Math.sin(a) + offY * Math.cos(a);
                 const v = makeVessel(g, wx, wy, rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
                 vessels.push(v);
                 born.push(v);
@@ -2493,9 +2512,12 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             get mainView() { return mainView; },
             get toastQueue() { return toastQueue; },
             get achieved() { return achieved; },
+            get debris() { return debris; },
             get timeScaleIdx() { return timeScaleIdx; },
+            set timeScaleIdx(v) { timeScaleIdx = v; },   // 测试直接设档，避免按键推 toast 污染队列
             shipInfo, shipMass, thrustAccel, shipSpec, gravityAt, atmosphereDensity,
             setShipDef, placeOnSurface, applyImpact, splitVessel, checkSeparation,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
             onKeyDown, blowUpPart, predictPath,
+            resetToasts,   // 测试用：清掉正在显示 + 排队中的全部横幅
         };

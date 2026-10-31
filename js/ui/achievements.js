@@ -108,6 +108,14 @@ export function updateAchievementToast(dt) {
     }
 }
 
+// 测试钩子：清掉正在显示 + 排队中的全部横幅（tools/tests 无头回归用）
+export function resetToasts() {
+    toastQueue.length = 0;
+    toastCurrent = null;
+    toastTimer = 0;
+    achievementEl.style.opacity = '0';
+}
+
 export function toggleAchievementPanel() {
     achievementPanelOpen = !achievementPanelOpen;
     if (achievementPanelOpen) {
