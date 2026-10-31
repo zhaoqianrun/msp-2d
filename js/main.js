@@ -1,3 +1,7 @@
+// ==================== 模块导入 ====================
+import { PART_TYPES, PART_PX } from './ship/partTypes.js';
+import { shipSpec, shipCenterOfMass } from './ship/shipSpec.js';
+
 
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
@@ -308,23 +312,6 @@
         const FUEL_BURN_SECONDS = 680;  // 满油门烧完一箱要多少秒
         const FUEL_FILL_RATE = 0.6;     // 每秒补 60%，大约 1.7 秒加满
 
-        // ==================== 部件（和 build.html 的定义必须一致）====================
-        const PART_TYPES = {
-            capsule: { name: '控制舱', w: 2, h: 2, mass: 30, fuel: 0, thrust: 0,
-                       body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9' },
-            tank:    { name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
-                       body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800' },
-            // 推力 1000（配合物理尺度 1px=1m、质量 115、重力 3.71 m/s²）
-            // 推重比 1000/115/3.71 = 2.35 : 1
-            //
-            // 比例从 1px=50m 改成 1px=1m 后，引力像素加速度大了 50 倍，
-            // 所以推力也要×50（20 → 1000）才能保持同样的推重比和飞行时间。
-            // 注意：推力必须和 build.html / station.html / index.html 保持一致。
-            engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000,
-                       body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
-        };
-        const PART_PX = 7;           // 游戏里一格画多少像素（调小 = 飞船看着更小；建造页是 20）
-
         // ==================== 尺度系统（单一比例）====================
         // 只有这一个比例：1 像素 = 1 米（恒定，不随缩放变）
         //
@@ -450,98 +437,6 @@
         // 活着的部件算出来的燃料容量（炸掉的箱子不再提供容量）
         function aliveFuelCap() { return shipInfo().fuelCap; }
 
-        function shipSpec(def) {
-            let dryMass = 0, fuelCap = 0, thrust = 0;
-            let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
-            for (const p of def.parts) {
-                const t = PART_TYPES[p.type];
-                if (!t) continue;
-                dryMass += t.mass; fuelCap += t.fuel; thrust += t.thrust;
-                minX = Math.min(minX, p.x);             maxX = Math.max(maxX, p.x + t.w);
-                minY = Math.min(minY, p.y);             maxY = Math.max(maxY, p.y + t.h);
-            }
-            if (minX > maxX) { minX = 0; maxX = 2; minY = 0; maxY = 2; }
-            const cx = (minX + maxX) / 2;
-            const spec = {
-                dryMass, fuelCap, thrust,
-                box: { minX, maxX, minY, maxY },
-                width: (maxX - minX) * PART_PX,
-                height: (maxY - minY) * PART_PX,
-                centerX: cx,                     // 船的中轴（格坐标）
-                bottomY: minY,                   // 最底下（发动机喷口）
-                corners: null,                   // 下面填
-                com: { x: 0, y: 0 },             // 质心（本地像素坐标）
-            };
-            spec.corners = shipCollisionPoints(def, spec);
-            spec.com = shipCenterOfMass(def, spec);
-            return spec;
-        }
-
-        // ==================== 质心（重心）====================
-        // 航天器应该绕自己的重心旋转，而不是绕控制舱、也不是绕船底。
-        // 做法：每个部件的质量放在它自己的几何中心上，加权平均。
-        //   燃料算在燃料箱里 —— 所以油烧掉后，重心会往船头方向偏。
-        function shipCenterOfMass(def, spec, fuelRatio) {
-            const P = PART_PX;
-            const fr = (typeof fuelRatio === 'number') ? fuelRatio : 1;   // 默认按满油算
-            const cx = spec.centerX;
-            const bottom = spec.box.maxY;
-            let mx = 0, my = 0, total = 0;
-
-            for (const p of def.parts) {
-                const t = PART_TYPES[p.type];
-                if (!t) continue;
-                // 部件质量：燃料箱里有多少油，就算多少燃料质量（质量随燃料减少）
-                const partFuel = t.fuel * fr;
-                const m = t.mass + partFuel;
-                if (m <= 0) continue;
-                // 部件几何中心（本地像素：x 以中轴为 0，y 以底面为 0、向上为负）
-                const px = (p.x + t.w / 2 - cx) * P;
-                const py = (bottom - (p.y + t.h / 2)) * P;
-                mx += px * m;
-                my += py * m;
-                total += m;
-            }
-            if (total <= 0) return { x: 0, y: 0 };
-            return { x: mx / total, y: my / total };
-        }
-
-        // ==================== 碰撞箱 ====================
-        // 飞船不是"一个点" —— 有大小、还会转。
-        // 所以取一圈轮廓点（船体的四个角 + 每个部件的外角），
-        // 撞地判定看「哪个点最低」，着陆就贴在那个点上，这样船才不会插进地里。
-        function shipCollisionPoints(def, spec) {
-            const P = PART_PX;
-            const cx = spec.centerX;
-            const bottom = spec.box.maxY;
-            const pts = [];
-            const seen = {};
-
-            function add(gx, gy) {
-                const key = gx.toFixed(2) + ',' + gy.toFixed(2);
-                if (seen[key]) return;
-                seen[key] = 1;
-                // 网格坐标（y 向上）→ 船体本地像素（x 以中轴为 0，y 以底面为 0、向上为负）
-                pts.push({ x: (gx - cx) * P, y: (bottom - gy) * P });
-            }
-
-            // 整体包围盒的四个角
-            add(spec.box.minX, spec.box.minY);
-            add(spec.box.maxX, spec.box.minY);
-            add(spec.box.minX, spec.box.maxY);
-            add(spec.box.maxX, spec.box.maxY);
-
-            // 每个部件的四个角（这样凹凸的外形也能被算进去）
-            for (const p of def.parts) {
-                const t = PART_TYPES[p.type];
-                if (!t) continue;
-                add(p.x, p.y);
-                add(p.x + t.w, p.y);
-                add(p.x, p.y + t.h);
-                add(p.x + t.w, p.y + t.h);
-            }
-            return pts;
-        }
 
         // 把船的本地坐标点转到世界坐标（考虑位置和旋转）
         // 本地坐标（以船底中轴为原点）→ 世界坐标
