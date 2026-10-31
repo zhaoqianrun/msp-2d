@@ -623,6 +623,91 @@ test('[多船] activateVessel：接管残骸、旧主船降级、可切回（部
     resetToGround();
 });
 
+test('[多船] 残骸自旋：分离/撞击带来翻滚，着陆停转', () => {
+    // 默认船炸掉油箱 → born = 发动机截；放到空中给它确定的自旋
+    resetToGround();
+    t.destroyed.add('d2');
+    t.invalidateShipCache();
+    t.checkSeparation();
+    const born = t.vessels[1];
+    const angle0 = born.angle;
+    born.x = planet.x;
+    born.y = planet.y - (planet.radius + 50000);
+    born.vx = Math.sqrt(GRAVITY_MU / (planet.radius + 50000)) * 0.5;
+    born.vy = 0;
+    born.landed = false;
+    born.spin = 45;          // 45°/s，顺时针
+    env.pumpFrames(60);      // 1 游戏秒
+    assert(!born.landed, '空中不应着陆');
+    const turned = ((born.angle - angle0) % 360 + 360) % 360;
+    near(turned, 45, 6, '1 秒应转 ~45°');
+    // 着陆停转
+    born.spin = 90;
+    born.landed = true;
+    env.pumpFrames(10);
+    assert(born.spin === 0, '着陆后自旋应归零');
+    resetToGround();
+});
+
+test('[多船] 船-船碰撞：相互推开、不穿过、高速互撞掉血', () => {
+    resetToGround();
+    t.destroyed.add('d2');
+    t.invalidateShipCache();
+    t.checkSeparation();
+    assert(t.vessels.length === 2, '应有两截');
+    const born = t.vessels[1];
+    // 两船都放到 10km 高空（贴地会被地面摩擦吃掉滑行速度）：主船在左，
+    // 残骸在右，相距 500px，主船以 250px/s 靠近（> DAMAGE_SPEED=120）
+    const ALT = planet.radius + 10000;
+    t.rocket.x = planet.x - 250;
+    t.rocket.y = planet.y - ALT;
+    t.rocket.vx = 250;
+    t.rocket.vy = 0;
+    t.rocket.landed = false;
+    t.rocket.state = 'idle';
+    born.x = planet.x + 250;
+    born.y = planet.y - ALT;
+    born.vx = 0;
+    born.vy = 0;
+    born.landed = false;
+    t.resetInterp();
+    const hpBefore = Math.min(...Object.values(t.partHP));
+    env.pumpFrames(120);     // 2 游戏秒，足够撞上
+    const dx = born.x - t.rocket.x;
+    const ra = Math.max(t.SPEC.width, t.SPEC.height) * 0.55;
+    const rb = Math.max(born.spec.width, born.spec.height) * 0.55;
+    assert(Math.abs(dx) >= (ra + rb) * 0.6, '碰撞后应被推开, dx=' + dx.toFixed(0));
+    assert(dx > 0, '主船不应穿过残骸');
+    const hpAfter = Math.min(...Object.values(t.partHP));
+    assert(hpAfter < hpBefore, '高速互撞应掉血: before=' + hpBefore + ' after=' + hpAfter);
+    const bornHpMin = Math.min(...Object.values(born.hp));
+    assert(bornHpMin < 120, '残骸也应掉血, min=' + bornHpMin.toFixed(1));
+    const relvx = born.vx - t.rocket.vx;
+    assert(relvx > 0, '碰撞后应转为相互远离');
+    resetToGround();
+});
+
+test('[多船] 带伤分离：血量从主船表切过去，不再满血复活', () => {
+    t.setShipDef({ version: 1, name: '三节船', parts: [
+        { id: 'e1', type: 'engine',  x: 0, y: 0 },
+        { id: 'm1', type: 'tank',    x: 0, y: 2 },
+        { id: 'k1', type: 'capsule', x: 0, y: 5 },
+    ]});
+    t.vessels.splice(1);      // 多船时代 setShipDef 不清世界：测试要自己清场上残骸
+    t.resetInterp();
+    t.mainView._impactCooldown = 0;
+    t.applyImpact(400);                       // 全船掉血（<700 不会当场炸）
+    t.destroyed.add('m1');
+    t.invalidateShipCache();
+    t.checkSeparation();
+    assert(t.vessels.length === 2, '应分成两截');
+    const born = t.vessels[1];                // 发动机那截
+    const engine = born.def.parts.find(p => p.type === 'engine');
+    assert(born.hp[engine.id] < 110,
+           `发动机血量应带伤（<110）, got ${born.hp[engine.id].toFixed(1)}（旧实现满血 120）`);
+    resetToGround();
+});
+
 // ============================================================
 
 console.log('\n==========================================');

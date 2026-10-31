@@ -815,6 +815,12 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 get hp() { return partHP; }, set hp(v) { partHP = v; },
                 get temp() { return partTemp; }, set temp(v) { partTemp = v; },
                 get dead() { return destroyed; }, set dead(v) { destroyed = v; },
+                // 兼容别名：与 makeVessel 的残骸对象用同一套字段名
+                // （vesselMass 等通用函数读 v.destroyed / v.partHP / v.partTemp，
+                //   别让「主视图」和「残骸」的字段名分叉 —— 曾经因此炸过）
+                get partHP() { return partHP; },
+                get partTemp() { return partTemp; },
+                get destroyed() { return destroyed; },
             };
         }
 
@@ -843,6 +849,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 state: 'idle',
                 landed: false,
                 heat: 0,
+                spin: 0,              // 角速度（°/s）：分离/撞击带来的翻滚
                 // 注意：下面三个用「短名字」hp/temp/dead，
                 // 和主船视图（mainView）保持同一套字段名，
                 // 这样物理代码不需要区分「这是玩家船还是残骸」。
@@ -980,6 +987,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 }
             }
             if (v.isMain && blew > 0) wreckedCount += blew;
+            // 非主船的残骸：撞击带来随机翻滚（主船姿态由玩家控制，不在此干预）
+            if (!v.isMain) {
+                v.spin = Math.max(-360, Math.min(360, (v.spin || 0) + (Math.random() - 0.5) * speed * 0.06));
+            }
             return blew;
         }
 
@@ -1086,6 +1097,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             // 满油落地
             rocket.fuel = 1;
             lastComFuel = -1;
+            chuteState = 'packed';
             rocket.throttle = 1;
             rocket.state = 'idle';
             rocket.angle = 90;
@@ -1126,7 +1138,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             rocket.throttle = 1;
             rocket.state = 'idle';
             placeOnSurface();
-            resetInterp();   // 换船是传送：插值状态归位，相机由渲染循环接管
+            resetInterp();
+            chuteState = 'packed';   // 新船的伞是包好的
         }
 
         // ==================== 本局任务自动存档 ====================
@@ -1347,6 +1360,13 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 const wx = originX + offX * Math.cos(a) - offY * Math.sin(a);
                 const wy = originY + offX * Math.sin(a) + offY * Math.cos(a);
                 const v = makeVessel(g, wx, wy, rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
+                // 带伤分离：血量/温度从主船表按 id 切过去（旧实现满血复活）
+                for (const p of g) {
+                    if (partHP[p.id] !== undefined) v.hp[p.id] = partHP[p.id];
+                    if (partTemp[p.id] !== undefined) v.temp[p.id] = partTemp[p.id];
+                }
+                v.def.name = '残骸 ' + v.id.slice(1);
+                v.spin = (Math.random() - 0.5) * 40;   // 爆炸冲量 → 随机翻滚
                 vessels.push(v);
                 born.push(v);
             });
@@ -1426,6 +1446,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             invalidateShipCache();
             resetImpactBudget();
             resetInterp();
+            chuteState = 'packed';   // 目标船的伞是包好的（chuteState 是全局的，别把上一艘的伞状态带过来）
             toastQueue.push({
                 title: '切 换 操 控',
                 name: shipDef.name || '已接管航天器',
@@ -1463,6 +1484,13 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
                 // 再入加热 —— 残骸也会被烧毁
                 updateHeat(dt, v);
+
+                // 自旋：分离/撞击带来的翻滚（着陆后停转）
+                if (v.landed) {
+                    if (v.spin) v.spin = 0;
+                } else if (v.spin) {
+                    v.angle = ((v.angle + v.spin * dt) % 360 + 360) % 360;
+                }
 
                 if (v.landed) continue;
 
@@ -1515,6 +1543,54 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                         v.vy = slideY * GROUND_FRICTION;
                         if (Math.hypot(v.vx, v.vy) < 12) {
                             v.vx = 0; v.vy = 0; v.landed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== 船-船碰撞 ====================
+        // 主船与残骸、残骸互相之间：包围球粗检 → 沿质心连线推开（按质量分配）
+        // → 法向动量交换（恢复系数 0.3）→ 相对速度够大时双方掉血/翻滚。
+        // 以前飞船互相穿过 —— 多飞船没有物理存在感的一大来源。
+        function collideVessels() {
+            for (let i = 0; i < vessels.length; i++) {
+                for (let j = i + 1; j < vessels.length; j++) {
+                    const va = vessels[i], vb = vessels[j];
+                    if (va.landed && vb.landed) continue;   // 两个都停着不动就不管
+                    const ra = Math.max(va.spec.width, va.spec.height) * 0.55;
+                    const rb = Math.max(vb.spec.width, vb.spec.height) * 0.55;
+                    const dx = vb.x - va.x, dy = vb.y - va.y;
+                    const dist = Math.hypot(dx, dy) || 0.001;
+                    if (dist >= ra + rb) continue;
+                    const nx = dx / dist, ny = dy / dist;
+                    const ma = Math.max(1, vesselMass(va).total);
+                    const mb = Math.max(1, vesselMass(vb).total);
+                    // 推开重叠（重的一方少动）
+                    const overlap = (ra + rb) - dist;
+                    va.x -= nx * overlap * (mb / (ma + mb));
+                    va.y -= ny * overlap * (mb / (ma + mb));
+                    vb.x += nx * overlap * (ma / (ma + mb));
+                    vb.y += ny * overlap * (ma / (ma + mb));
+                    // 法向冲量（只在相互接近时）
+                    const rv = (vb.vx - va.vx) * nx + (vb.vy - va.vy) * ny;
+                    if (rv < 0) {
+                        const e = 0.3;
+                        const j = -(1 + e) * rv / (1 / ma + 1 / mb);
+                        va.vx -= (nx * j) / ma;
+                        va.vy -= (ny * j) / ma;
+                        vb.vx += (nx * j) / mb;
+                        vb.vy += (ny * j) / mb;
+                        // 着陆的船被撞醒
+                        if (j / ma > 5) va.landed = false;
+                        if (j / mb > 5) vb.landed = false;
+                        // 自旋扰动（主船姿态归玩家管）
+                        if (!va.isMain) va.spin = Math.max(-360, Math.min(360, (va.spin || 0) + (Math.random() - 0.5) * (-rv) * 0.1));
+                        if (!vb.isMain) vb.spin = Math.max(-360, Math.min(360, (vb.spin || 0) + (Math.random() - 0.5) * (-rv) * 0.1));
+                        // 相对速度够大 → 双方掉血
+                        if (-rv > DAMAGE_SPEED) {
+                            applyImpact(-rv, va);
+                            applyImpact(-rv, vb);
                         }
                     }
                 }
@@ -1951,7 +2027,9 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     // ---- 降落伞：实时按「伞面积 x 大气密度 x 速度²」减速 ----
                     // 和空气阻力同一套公式，只是等效面积大得多。
                     // 高空密度低 -> 几乎没用；越往下越猛 -> 和真实降落伞一样。
-                    if (chuteState === 'open' && dens > CHUTE_MIN_DENSITY) {
+                    // 必须先确认船上真的有伞：chuteState 是全局的，
+                    // 切船/换船后如果忘了重置，无伞船会吃「幽灵伞」阻力。
+                    if (chuteState === 'open' && hasChute() && dens > CHUTE_MIN_DENSITY) {
                         const chuteDrag = DRAG_COEF * CHUTE_AREA * dens * sp * sp;
                         chuteDragNow = chuteDrag;
                         rocket.vx -= (rocket.vx / sp) * chuteDrag * dt;
@@ -2142,6 +2220,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
             // 失控的航天器（惯性飞行，不能操控）
             updateDerelicts(dt);
+            collideVessels();
 
             // 边界保护：飞出行星系统太远时给个提示，别让玩家莫名其妙一直飘
             {
