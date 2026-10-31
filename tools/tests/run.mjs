@@ -408,9 +408,9 @@ test('[输入] 100x 下旋转按真实时间响应：10 帧约 15°，不再一�
     resetToGround();
 });
 
-test('[相机] 100x 加速下相机跟得住：飞船不出半屏', () => {
+test('[相机] 相机硬锁飞船：任何速度/倍率下船恒在屏幕正中（不滞后不抖动）', () => {
     resetToGround();
-    // 直接放进 500km 高的圆轨道（速度 ~2780 px/s，100x 下一帧位移 ~1.2 万 px）
+    // 直接放进 500km 高的圆轨道（速度 ~2780 px/s，100x 下一帧位移 ~4600 px）
     const r0 = planet.radius + 500000;
     const v = Math.sqrt(GRAVITY_MU / r0);
     t.rocket.x = planet.x;
@@ -425,8 +425,7 @@ test('[相机] 100x 加速下相机跟得住：飞船不出半屏', () => {
     t.timeScaleIdx = 5;      // 100x
     env.pumpFrames(30);
     const gap = Math.hypot(t.camera.x - t.rocket.x, t.camera.y - t.rocket.y);
-    const maxGap = 1280 * 0.5 / t.camera.zoom;   // headless 视口 1280
-    assert(gap <= maxGap * 1.05 + 1, '相机-飞船距离 ' + gap.toFixed(0) + 'px 应 ≤ 半屏 ' + maxGap.toFixed(0) + 'px');
+    assert(gap < 1e-6, '相机应与飞船精确重合, gap=' + gap.toFixed(3) + 'px（旧平滑实现滞后 ~400px 且随帧率抖动）');
     t.timeScaleIdx = 0;
     resetToGround();
 });

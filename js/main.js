@@ -2046,22 +2046,13 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
             // 相机对准质心 —— 原点在船底，直接跟原点的话大船会偏在屏幕下方看不全
             const camPt = shipPointWorld(SPEC.com.x, SPEC.com.y, rocket.angle);
-            // 跟随按「游戏时间」换算：100x 下一帧飞船能位移上千 px，按真实时间
-            // 做指数追赶会永久滞后、把船跟丢。
-            const camFollow = 1 - Math.exp(-9.75 * Math.min(frameTime * timeScale(), 0.25));
-            camera.x += (camPt.x - camera.x) * camFollow;
-            camera.y += (camPt.y - camera.y) * camFollow;
-            // 兜底：目标离相机超过半个屏幕就硬夹回半屏边缘，任何倍率下船不出画
-            {
-                const maxGap = Math.max(canvasW, canvasH) * 0.5 / camera.zoom;
-                const gxC = camPt.x - camera.x, gyC = camPt.y - camera.y;
-                const gd = Math.hypot(gxC, gyC);
-                if (gd > maxGap) {
-                    const k = (gd - maxGap) / gd;
-                    camera.x += gxC * k;
-                    camera.y += gyC * k;
-                }
-            }
+            // 相机硬锁飞船质心，不做任何平滑。
+            // 任何平滑系数（0.15 lerp / 指数追赶）产生的滞后都与速度成正比：
+            // 船越快越偏，帧率一波动滞后量还跟着抖 —— 这就是先后两版
+            // 「相机跟不住 / 一卡一卡」的根因。平滑由物理本身保证（位置连续），
+            // 相机只负责居中；传送类场景（换船/重开/读档）各自直接设置相机。
+            camera.x = camPt.x;
+            camera.y = camPt.y;
 
             ctx.fillStyle = '#050510';
             ctx.fillRect(0, 0, canvasW, canvasH);
