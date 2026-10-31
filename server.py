@@ -27,6 +27,9 @@ CLIENT_TIMEOUT = 15        # 超过这么久没心跳，就算这个端掉线了
 CONTROL_TIMEOUT = 8        # 操控端超过这么久没上报，就认为操控断了
 
 STATE_LOCK = threading.Lock()
+FILE_LOCK = threading.Lock()      # 存档/飞船文件的写锁：并发保存不能写同一个 .tmp
+MAX_BODY = 8 * 1024 * 1024        # 请求体上限：异常客户端声明超大 Content-Length 直接拒收
+KICK_COOLDOWN = 30                # 被踢的端在这么多秒内不会被自动重新接管操控
 
 # 所有连接端：{client_id: {...}}
 clients = {}
@@ -84,13 +87,29 @@ def _touch(client_id, ip, observe=False):
             clients[client_id] = c
         c["observe"] = observe
 
+        was_offline = not _is_online(c)
         c["last_seen"] = _now()
         c["online"] = True
         c["ip"] = ip
 
+        # 别的操控端还在线，而这是一个掉线回归的老操控端 → 降级成观战。
+        # 不降级会出现两个操控端各跑各的物理、10Hz 互相覆盖世界状态，
+        # 观战端画面在两艘船之间来回跳。
+        if (not observe and c["role"] == "control" and was_offline
+                and any(x["id"] != client_id and x["role"] == "control" and _is_online(x)
+                        for x in clients.values())):
+            c["role"] = "spectate"
+            print(f"[协同] {client_id} 掉线期间操控权已被接管，回归后降级为观战")
+            _save_clients()
+            return c
+
+        # 被踢的端给一段冷却期：冷却内不自动接管操控（不然踢完 1 秒就复活）
+        recently_kicked = c.get("kicked_at", 0) > _now() - KICK_COOLDOWN
+
         # 没有任何人在操控（第一次开服 / 操控端掉了 / 服主把操控端撤了）
         # → 这个端自动接管，保证总有人能玩（但观察站不接管）
-        if not observe and not any(x["role"] == "control" and _is_online(x) for x in clients.values()):
+        if (not observe and not recently_kicked
+                and not any(x["role"] == "control" and _is_online(x) for x in clients.values())):
             if c["role"] != "control":
                 c["role"] = "control"
                 print(f"[协同] {client_id} 自动接管操控权（当前没有操控端）")
@@ -199,10 +218,13 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
 
     def log_message(self, fmt, *args):
-        """自定义日志格式，带时间戳；只记录 API 请求和错误，避免刷屏"""
+        """自定义日志格式，带时间戳；只记录 API 请求和错误，避免刷屏。
+        /api/state、/api/ctrl 是 100ms~1s 一次的心跳，成功时不打 ——
+        10Hz 打日志会把 Windows 控制台拖慢，还会把有用的日志淹掉；出错照打。"""
         timestamp = time.strftime("%H:%M:%S")
         status = args[1] if len(args) > 1 else "?"
-        if "/api/" in self.path or status != "200":
+        quiet = ("/api/state" in self.path or "/api/ctrl" in self.path)
+        if (("/api/" in self.path and not quiet) or status != "200"):
             print(f"[{timestamp}] {self.client_address[0]} | {fmt % args}")
 
     def send_json(self, payload, status=200):
@@ -242,14 +264,26 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         """观察站这类"只看不玩"的端：不抢操控权，也不给操控权"""
         from urllib.parse import urlparse, parse_qs
         q = parse_qs(urlparse(self.path).query)
-        return (q.get("observe") or [""])[0] == "1" 
+        return (q.get("observe") or [""])[0] == "1"
+
+    def _touch_if_client(self):
+        """带 cid 的请求才登记心跳。
+        不带 cid 的（静态页顺带拉一下 /api/ship、/api/load）直接跳过：
+        否则每个访客都会被折叠成一个 anon-IP 幽灵端，甚至在没有操控端时
+        被自动提成操控端，把真玩家卡在观战模式里。"""
+        cid = self._client_id()
+        if cid.startswith("anon-"):
+            return None
+        return _touch(cid, self.client_address[0], self._is_observer())
 
     def _read_body(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
-        raw = self.rfile.read(length) if length > 0 else b""
+        if length <= 0 or length > MAX_BODY:
+            return None
+        raw = self.rfile.read(length)
         try:
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -267,8 +301,10 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         _sweep_offline()
         cid = self._client_id()
         me = _touch(cid, self.client_address[0], self._is_observer())
-        ctrl = _control_client()
         with STATE_LOCK:
+            # _control_client 要遍历 clients 字典，必须在锁内做，
+            # 否则别的线程插入了新端会抛 "dictionary changed size during iteration"
+            ctrl = _control_client()
             payload = {
                 "id": cid,
                 "role": me["role"],                     # control / spectate
@@ -393,6 +429,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
             clients[target]["online"] = False
             clients[target]["last_seen"] = 0
             clients[target]["role"] = "spectate"
+            clients[target]["kicked_at"] = _now()   # 冷却期内不被自动重新接管
             _save_clients()
         print(f"[协同] 服主把 {target} 踢下线了")
         self.send_json({"ok": True, "id": target})
@@ -412,7 +449,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
     # ---------- 飞船（造船厂产物）----------
     def handle_ship_get(self):
         """play-main.html 读飞船；没有就返回空，前端会用默认船"""
-        _touch(self._client_id(), self.client_address[0], self._is_observer())
+        self._touch_if_client()
         if not os.path.exists(SHIP_PATH):
             self.send_json({"ok": True, "ship": None})
             return
@@ -427,16 +464,17 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_ship_post(self):
         """build.html 保存飞船"""
-        _touch(self._client_id(), self.client_address[0], self._is_observer())
+        self._touch_if_client()
         body = self._read_body()
         if not isinstance(body, dict) or not isinstance(body.get("parts"), list):
             self.send_json({"ok": False, "error": "bad-ship"}, status=400)
             return
         tmp = SHIP_PATH + ".tmp"
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(body, f, ensure_ascii=False)
-            os.replace(tmp, SHIP_PATH)
+            with FILE_LOCK:   # 两个标签页同时保存时，不能写同一个 .tmp 文件
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(body, f, ensure_ascii=False)
+                os.replace(tmp, SHIP_PATH)
         except OSError as e:
             print(f"[飞船] 保存失败: {e}")
             self.send_json({"ok": False, "error": "write-failed"}, status=500)
@@ -469,7 +507,7 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def handle_load(self):
-        _touch(self._client_id(), self.client_address[0], self._is_observer())
+        self._touch_if_client()
         stamp = time.strftime("%H:%M:%S")
         if not os.path.exists(SAVE_PATH):
             print(f"[{stamp}] [读档] 没有存档，返回空对象")
@@ -507,13 +545,22 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         super().do_POST()
 
     def handle_save(self):
-        _touch(self._client_id(), self.client_address[0], self._is_observer())
         stamp = time.strftime("%H:%M:%S")
+        # 共享存档只有当前操控端能覆盖：观战端保存的是插值出来的别人的世界，
+        # 匿名端根本没有世界 —— 谁都能覆盖的话，一份坏数据就毁掉唯一一份存档。
+        me = self._touch_if_client()
+        if me is None or me["role"] != "control":
+            print(f"[{stamp}] [存档] 已拒绝：非操控端试图覆盖共享存档")
+            self.send_json({"ok": False, "error": "not-controller"}, status=403)
+            return
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
-        raw = self.rfile.read(length) if length > 0 else b""
+        if length <= 0 or length > MAX_BODY:
+            self.send_json({"ok": False, "error": "bad size"}, status=400)
+            return
+        raw = self.rfile.read(length)
 
         try:
             data = json.loads(raw.decode("utf-8"))
@@ -521,13 +568,19 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
             print(f"[{stamp}] [存档] 收到无效数据，已拒绝: {e}")
             self.send_json({"ok": False, "error": "invalid json"}, status=400)
             return
+        # 最低限度的结构校验：任意 JSON 直接落盘，下次读档会静默变「没有存档」
+        if not isinstance(data, dict) or not isinstance(data.get("rocket"), dict):
+            self.send_json({"ok": False, "error": "bad save format"}, status=400)
+            return
 
-        # 先写临时文件再改名替换：写到一半崩溃也不会把好存档弄坏
+        # 先写临时文件再改名替换：写到一半崩溃也不会把好存档弄坏。
+        # 加锁：两个端同时保存时不能写同一个 .tmp 文件（会交错写出坏 JSON）。
         tmp_path = SAVE_PATH + ".tmp"
         try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False)
-            os.replace(tmp_path, SAVE_PATH)
+            with FILE_LOCK:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+                os.replace(tmp_path, SAVE_PATH)
         except OSError as e:
             print(f"[{stamp}] [存档] 写入失败: {e}")
             self.send_json({"ok": False, "error": "write failed"}, status=500)

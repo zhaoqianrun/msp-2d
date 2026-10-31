@@ -3219,9 +3219,18 @@
 
         // ==== 存档/读档 ====
         function saveGame() {
+            // 观战端保存的是插值出来的「别人的世界」，覆盖共享存档等于存进去一份假数据
+            if (isSpectator()) {
+                toastQueue.push({
+                    title: '观 战 模 式',
+                    name: '观战端不能存档',
+                    desc: '只有操控端能覆盖共享存档',
+                });
+                return;
+            }
             unlock('save_game');
             const data = { planet, rocket, camera };
-            fetch('/api/save', {
+            fetch(apiUrl('/api/save'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -3238,7 +3247,7 @@
         }
 
         function loadGame() {
-            fetch('/api/load')
+            fetch(apiUrl('/api/load'))
                 .then(res => {
                     if (!res.ok) throw new Error('服务器返回 ' + res.status);
                     return res.json();
