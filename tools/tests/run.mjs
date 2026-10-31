@@ -174,6 +174,51 @@ test('[eef4497] 中间炸断：分离后质量/推力按剩的那截实时算', 
 });
 
 // ============================================================
+console.log('\n== 纯模块单测（直接 import 模块文件，不经过 __test）==');
+
+const { PART_TYPES, PART_PX } = await import('../../js/ship/partTypes.js');
+const { shipSpec, shipCenterOfMass } = await import('../../js/ship/shipSpec.js');
+const { fmtDistance: fmtDist, fmtSpeed: fmtSpd } = await import('../../js/core/format.js');
+
+test('[partTypes] 部件数据：发动机推力 1000、油箱容量 40（与物理口径一致）', () => {
+    assert(PART_TYPES.engine.thrust === 1000, 'engine.thrust=' + PART_TYPES.engine.thrust);
+    assert(PART_TYPES.tank.fuel === 40, 'tank.fuel=' + PART_TYPES.tank.fuel);
+    assert(PART_PX === 7, 'PART_PX=' + PART_PX);
+});
+
+test('[shipSpec] 默认船：干重75/油容40/推力1000，14×49m，8 个碰撞点', () => {
+    const def = { version: 1, name: 't', parts: [
+        { id: 'a', type: 'engine',  x: 0, y: 0 },
+        { id: 'b', type: 'tank',    x: 0, y: 2 },
+        { id: 'c', type: 'capsule', x: 0, y: 5 },
+    ]};
+    const s = shipSpec(def);
+    assert(s.dryMass === 75, 'dryMass=' + s.dryMass);
+    assert(s.fuelCap === 40, 'fuelCap=' + s.fuelCap);
+    assert(s.thrust === 1000, 'thrust=' + s.thrust);
+    assert(s.width === 14 && s.height === 49, `尺寸 ${s.width}×${s.height}`);
+    assert(s.box.minX === 0 && s.box.maxX === 2 && s.box.minY === 0 && s.box.maxY === 7,
+           '包围盒 ' + JSON.stringify(s.box));
+    assert(s.corners.length === 8, '碰撞点数=' + s.corners.length);
+    assert(s.centerX === 1 && s.bottomY === 0, '中轴/底面');
+});
+
+test('[shipSpec] 质心随燃料前移（满油 23.74 → 空油 23.33）', () => {
+    const def = { version: 1, name: 't', parts: [
+        { id: 'a', type: 'engine',  x: 0, y: 0 },
+        { id: 'b', type: 'tank',    x: 0, y: 2 },
+        { id: 'c', type: 'capsule', x: 0, y: 5 },
+    ]};
+    const s = shipSpec(def);
+    const full = shipCenterOfMass(def, s, 1);
+    const dry = shipCenterOfMass(def, s, 0);
+    near(full.y, 2730 / 115, 1e-6, '满油质心高度');
+    near(full.x, 0, 1e-9, '满油质心水平');
+    near(dry.y, 1750 / 75, 1e-6, '空油质心高度');
+    assert(dry.y < full.y, '油烧掉后质心应向船头（上）移');
+});
+
+// ============================================================
 
 console.log('\n==========================================');
 console.log(`结果：${passed} 通过，${failed} 失败`);
