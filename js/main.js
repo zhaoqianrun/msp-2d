@@ -13,7 +13,7 @@ import { fmtDistance, fmtSpeed } from './core/format.js';
 import { planet, GRAVITY_MU, gravityAt, atmosphereDensity, atmoThickness } from './world/planet.js';
 import { predictPath, predictPathOrigin } from './physics/prediction.js';
 import { camera } from './render/camera.js';
-import { skyTint, starVisibility, makeStarLayer, STAR_COLORS } from './render/sky.js';
+import { skyTint, starVisibility, skyAmount, atmoView, makeStarLayer, STAR_COLORS } from './render/sky.js';
 import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
          resetToasts, toastQueue, achieved, achievements } from './ui/achievements.js';
 import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu.js';
@@ -2970,13 +2970,16 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
             camera.y = rr.y;
 
             // ---- 天空色 + 星空（背景层，画在世界之前）----
-            // 船所在处的大气密度决定背景：地表蓝天无星 → 高空渐暗 → 太空满星
+            // 背景默认是太空（黑 + 星）。天空色只在「船在大气里」且「放大到
+            // 视野被大气填满」时才接管——远景看星球永远是太空 + 大气光晕。
             const shipDens = atmosphereDensity(rocket.x, rocket.y);
-            const tint = skyTint(shipDens);
+            const skyAmt = skyAmount(shipDens,
+                atmoView(planet.radius * camera.zoom, Math.min(canvasW, canvasH)));
+            const tint = skyTint(skyAmt);
             ctx.fillStyle = 'rgb(' + tint.r + ',' + tint.g + ',' + tint.b + ')';
             ctx.fillRect(0, 0, canvasW, canvasH);
 
-            const starVis = starVisibility(shipDens);
+            const starVis = starVisibility(skyAmt);
             if (starVis > 0.01 && starFarCv) {
                 // 近层视差：相机屏幕位移积分（每帧钳 ±48px，传送/硬夹不瞬移）
                 if (starCamX === null) { starCamX = camera.x; starCamY = camera.y; }

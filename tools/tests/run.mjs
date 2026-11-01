@@ -904,31 +904,43 @@ test('菜单开着泵帧无帧错误（帧守卫）', () => {
 console.log('\n== 天空与星空 ==');
 const sky = await import('../../js/render/sky.js');
 
+test('atmoView/skyAmount：远景看星球仍是太空，贴地放大才被天空接管', () => {
+    assert(sky.atmoView(0, 800) === 0, '星球屏半径 0 → 视野不在大气里');
+    assert(sky.atmoView(800 * 0.35, 800) === 0, '星球全景（≤0.35 屏高）→ 仍是太空');
+    assert(sky.atmoView(800 * 1.25, 800) === 1, '贴地（≥1.25 屏高）→ 视野全在大气里');
+    assert(sky.atmoView(800, 800) > 0.3 && sky.atmoView(800, 800) < 1, '中间态应平滑');
+    // 返工回归：地表（dens=1）+ 远景（atmoView=0）时天空不得接管背景
+    assert(sky.skyAmount(1, 0) === 0, '地表远景：天空色不得接管（否则淹没大气/星空）');
+    assert(sky.skyAmount(1, 1) === 1, '地表贴地：天空全接管');
+    assert(sky.skyAmount(0, 1) === 0, '真空：永远没有天空色');
+    assert(sky.skyAmount(5, 1) === 1, '密度越界应钳制');
+});
+
 test('skyTint：太空纯黑 / 地表全蓝 / 单调过渡 / 越界钳制', () => {
     const t0 = sky.skyTint(0);
     assert(t0.r === sky.SPACE_RGB.r && t0.g === sky.SPACE_RGB.g && t0.b === sky.SPACE_RGB.b,
-        'dens=0 应为太空底色: ' + JSON.stringify(t0));
+        '接管量=0 应为太空底色: ' + JSON.stringify(t0));
     const t1 = sky.skyTint(1);
     assert(t1.r === sky.SURFACE_SKY_RGB.r && t1.g === sky.SURFACE_SKY_RGB.g && t1.b === sky.SURFACE_SKY_RGB.b,
-        'dens=1 应为地表天空色: ' + JSON.stringify(t1));
+        '接管量=1 应为地表天空色: ' + JSON.stringify(t1));
     const tOver = sky.skyTint(5);
-    assert(tOver.r === t1.r && tOver.g === t1.g && tOver.b === t1.b, 'dens>1 应钳到地表色');
+    assert(tOver.r === t1.r && tOver.g === t1.g && tOver.b === t1.b, '接管量>1 应钳到地表色');
     let last = -1;
-    for (let d = 0; d <= 1.001; d += 0.1) {
-        const c = sky.skyTint(d).r;
-        assert(c >= last, '天空色应随密度单调变亮: ' + d + ' → ' + c);
+    for (let a = 0; a <= 1.001; a += 0.1) {
+        const c = sky.skyTint(a).r;
+        assert(c >= last, '天空色应随接管量单调变亮: ' + a + ' → ' + c);
         last = c;
     }
 });
 
-test('starVisibility：地表 0 / 太空 1 / 单调', () => {
-    assert(sky.starVisibility(1) === 0, '地表不应看见星星');
+test('starVisibility：接管量 0 满星 / 1 无星 / 单调', () => {
     assert(sky.starVisibility(0) === 1, '太空应满星');
+    assert(sky.starVisibility(1) === 0, '天空全接管时不应看见星星');
     assert(sky.starVisibility(5) === 0, '越界应钳为 0');
     let last = 2;
-    for (let d = 0; d <= 1.001; d += 0.1) {
-        const v = sky.starVisibility(d);
-        assert(v <= last, '星星可见度应随密度单调下降: ' + d + ' → ' + v);
+    for (let a = 0; a <= 1.001; a += 0.1) {
+        const v = sky.starVisibility(a);
+        assert(v <= last, '星星可见度应随接管量单调下降: ' + a + ' → ' + v);
         last = v;
     }
 });
@@ -947,19 +959,22 @@ test('星表 seeded 确定性：同 seed 逐字节一致，crosses 在末尾', (
         'crosses 应是末尾 N 颗');
 });
 
-test('高空满星渲染泵帧无帧错误（星空/视差/天空色全链路）', () => {
-    resetToGround();
-    // 把船放到大气外（密度 0）：走「太空黑 + 满星 + 近层平铺」渲染分支
+test('地表远景 + 高空满星两条背景链路泵帧均无帧错误', () => {
+    window.__lastGameError = undefined;     // 粘滞基线先清
+    resetToGround();                        // 地表远景：黑太空 + 大气光晕 + 星
+    env.pumpFrames(30);
+    assert(window.__lastGameError === undefined || window.__lastGameError === null,
+           '地表远景渲染不应抛错: ' + (window.__lastGameError && window.__lastGameError.message));
+    // 高空：太空黑 + 满星 + 近层平铺
     t.rocket.x = planet.x;
     t.rocket.y = planet.y - (planet.radius + 500000);
     t.rocket.vx = 0; t.rocket.vy = 0;
     t.rocket.landed = false;
     t.rocket.state = 'idle';
     t.resetInterp();
-    window.__lastGameError = undefined;     // 粘滞基线先清
     env.pumpFrames(60);
     assert(window.__lastGameError === undefined || window.__lastGameError === null,
-           '星空渲染循环不应抛错: ' + (window.__lastGameError && window.__lastGameError.message));
+           '高空满星渲染不应抛错: ' + (window.__lastGameError && window.__lastGameError.message));
     resetToGround();
 });
 

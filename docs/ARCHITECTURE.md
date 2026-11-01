@@ -26,7 +26,8 @@ js/
   ui/achievements.js 成就 + toast + 面板
   ui/pauseMenu.js   ESC 暂停菜单：只管 DOM 开合，动作由 main.js 注入；paused 状态在 main.js
   render/camera.js  相机状态对象
-  render/sky.js     天空色/星表生成（纯计算，Node 可测；绘制接线在 main.js）
+  render/sky.js     天空色/星表生成（纯计算，Node 可测；天空色只在「船在大气里
+                    且视野被大气填满」时接管背景，远景永远是太空+大气光晕）
 
 tools/tests/
   headless.mjs      手写浏览器桩（canvas/DOM/localStorage/断网 fetch/手动泵帧）

@@ -1,8 +1,10 @@
 // ==================== 天空与星空（纯计算） ====================
-// 背景层的数据与颜色：天空色按大气密度插值、星表 seeded 确定性生成。
+// 背景层数据与颜色。设计要点：背景默认是太空（黑 + 星），只有当
+// 「船在大气里」且「视野确实被大气填满（贴地放大）」时天空色才接管——
+// 否则地表远景会把整个宇宙染成蓝天，淹没大气光晕和星空（一期返工教训）。
 // 不碰 DOM/画布 —— Node 可直接 import 单测；绘制接线在 main.js。
 
-// 太空底色（与旧清屏色 #050510 一致）与地表天空色（石板蓝，贴合 UI 基调）
+// 太空底色（原清屏色 #050510）与地表天空色（石板蓝，贴合 UI 基调）
 export const SPACE_RGB = { r: 5, g: 5, b: 16 };
 export const SURFACE_SKY_RGB = { r: 116, g: 162, b: 204 };
 
@@ -16,9 +18,21 @@ export const STAR_COLORS = [
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-// 密度 → 天空色。dens=1 地表全蓝、=0 太空纯黑；×1.15 让低空尽快蓝起来
-export function skyTint(dens) {
-    const t = clamp01((dens || 0) * 1.15);
+// 星球屏幕半径 → 「视野浸在大气里」的程度 0..1。
+// prs ≤ 0.35×viewH（看到星球全景）→ 0：背景仍是太空；
+// prs ≥ 1.25×viewH（几乎贴着地表）→ 1：天空色才有资格接管背景。
+export function atmoView(prs, viewH) {
+    return clamp01((prs - viewH * 0.35) / (viewH * 0.9));
+}
+
+// 天空接管量：船在大气里 × 视野被大气填满——两个条件都满足才偏蓝
+export function skyAmount(dens, atmoV) {
+    return clamp01((dens || 0) * 1.15) * clamp01(atmoV || 0);
+}
+
+// 接管量 → 天空色（0 = 太空纯黑，1 = 地表全蓝）
+export function skyTint(amt) {
+    const t = clamp01(amt);
     return {
         r: Math.round(lerp(SPACE_RGB.r, SURFACE_SKY_RGB.r, t)),
         g: Math.round(lerp(SPACE_RGB.g, SURFACE_SKY_RGB.g, t)),
@@ -26,10 +40,9 @@ export function skyTint(dens) {
     };
 }
 
-// 密度 → 星星可见度：地表看不见星星，越高越亮（比天空色衰减更快一点）
-export function starVisibility(dens) {
-    const t = clamp01((dens || 0) * 1.15);
-    return clamp01(1 - t * 1.4);
+// 接管量 → 星星可见度：天空接管越多，星星越隐（地表放大时完全消失）
+export function starVisibility(amt) {
+    return clamp01(1 - clamp01(amt) * 1.4);
 }
 
 // seeded 随机数（mulberry32）—— 同 seed 星表完全一致，可复现可测试
