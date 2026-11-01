@@ -22,6 +22,7 @@ js/
   ship/…            vessel/damage 计划中（见「边界」）
   physics/prediction.js  轨道预测：真空椭圆走解析几何，其余数值积分（与 physicsStep 同一套力）
   ui/achievements.js 成就 + toast + 面板
+  ui/pauseMenu.js   ESC 暂停菜单：只管 DOM 开合，动作由 main.js 注入；paused 状态在 main.js
   render/camera.js  相机状态对象
 
 tools/tests/

@@ -60,27 +60,6 @@
         }
         #stage-stack .stg.done { opacity: .38; text-decoration: line-through; }
 
-        /* 分级堆栈面板（KSP 式，自底向上；:empty 自动隐藏） */
-        #stage-stack {
-            position: absolute; left: 14px; bottom: 385px;
-            display: flex; flex-direction: column; gap: 4px;
-            font-family: var(--mono); font-size: 11px;
-            pointer-events: none;
-        }
-        #stage-stack:empty { display: none; }
-        #stage-stack .stg {
-            background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-            padding: 3px 9px; color: var(--dim);
-            display: flex; align-items: center; gap: 8px;
-        }
-        #stage-stack .stg .stg-n {
-            font-weight: 600; color: var(--text); min-width: 14px; text-align: center;
-        }
-        #stage-stack .stg.next {
-            border-color: var(--amber); color: var(--amber);
-        }
-        #stage-stack .stg.done { opacity: .38; text-decoration: line-through; }
-
         /* 飞行数据 HUD：经典终端风文本块（js/main.js 写 innerText，按信息
            层级分行；宽度自适应、超长自动折行不丢字） */
         #hud {
@@ -333,6 +312,49 @@
         }
         #t-ignite.active { background: var(--amber); border-color: var(--amber); color: #241a04; }
 
+        /* ==================== ESC 暂停菜单（遮罩 + 菜单卡） ==================== */
+        /* 列表按钮由 js/ui/pauseMenu.js 生成。hidden 控制显示，但下面的
+           display:flex 会盖过 UA 的 [hidden] 规则，必须显式压回来 */
+        #pause-menu {
+            position: absolute; inset: 0; z-index: 12;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(3, 6, 12, .55);
+            backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+        }
+        #pause-menu[hidden] { display: none; }
+        #pause-card {
+            width: min(320px, calc(100vw - 32px));
+            padding: 18px 20px 12px;
+            background: var(--panel-solid); border: 1px solid var(--line); border-radius: 10px;
+            box-shadow: var(--shadow);
+        }
+        .pm-title {
+            color: var(--text); font-size: 15px; letter-spacing: 6px; text-align: center;
+            padding-bottom: 12px; margin-bottom: 10px;
+            border-bottom: 1px solid var(--line-soft);
+        }
+        .pm-list { display: flex; flex-direction: column; gap: 6px; }
+        .pm-btn {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px;
+            background: rgba(74, 144, 217, .06); color: var(--text);
+            font-family: var(--sans); font-size: 13.5px; letter-spacing: 2px;
+            cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+        }
+        .pm-btn:hover { border-color: var(--blue); background: rgba(74, 144, 217, .14); }
+        .pm-btn:active { background: rgba(74, 144, 217, .22); }
+        .pm-btn kbd {
+            font-family: var(--mono); font-size: 11px; color: var(--text);
+            background: rgba(74, 144, 217, .12); border: 1px solid var(--line);
+            border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px;
+        }
+        .pm-btn.danger { color: var(--red); border-color: rgba(255, 106, 106, .4); }
+        .pm-btn.danger:hover { border-color: var(--red); background: rgba(255, 106, 106, .1); }
+        .pm-note {
+            margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft);
+            color: var(--dim); font-size: 11.5px; font-family: var(--mono); text-align: center;
+        }
+
         /* ==================== 窄屏 / 矮屏 ==================== */
         @media (max-width: 760px) {
             /* 竖排按钮会占到 ~120px 高，数据面板往下让位 */
@@ -353,7 +375,6 @@
         @media (max-height: 620px) {
             #top-left { top: 96px; }
             #hud { font-size: 11px; line-height: 1.5; width: calc(100vw - 20px); }
-            #stage-stack { display: none; }
             #stage-stack { display: none; }
             .sys-row { flex-wrap: nowrap; }
             #throttle-bar { left: calc(50% - 48px); bottom: 14px; height: 120px; }
@@ -386,7 +407,6 @@
     <div id="throttle-bar"><div id="throttle-fill"></div></div>
     <div id="throttle-text">油门 100%</div>
     <div id="stage-stack"></div>
-    <div id="stage-stack"></div>
     <div id="fuel-bar"><div id="fuel-fill"></div></div>
     <div id="fuel-text">燃料 100%</div>
 
@@ -397,6 +417,15 @@
         <div id="achievement-desc"></div>
     </div>
     <div id="achievement-panel"></div>
+
+    <!-- ESC 暂停菜单：遮罩点击 = 继续；列表按钮由 js/ui/pauseMenu.js 生成 -->
+    <div id="pause-menu" hidden>
+        <div id="pause-card">
+            <div class="pm-title">菜 单</div>
+            <div class="pm-list" id="pause-list"></div>
+            <div class="pm-note">ESC 继续 · 点遮罩处也可继续</div>
+        </div>
+    </div>
 
     <!-- 观战角标（竖排，JS 控制显示） -->
     <div id="spectator-badge">观 战 中</div>
@@ -440,6 +469,8 @@
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/></svg>协同</button>
             <button class="sys-btn" onclick="toggleTouchPanel()">
                 <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18h2"/></svg>触控</button>
+            <button class="sys-btn" onclick="togglePauseMenu()">
+                <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg>菜单</button>
         </div>
     </div>
 

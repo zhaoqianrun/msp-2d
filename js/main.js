@@ -15,6 +15,7 @@ import { predictPath, predictPathOrigin } from './physics/prediction.js';
 import { camera } from './render/camera.js';
 import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
          resetToasts, toastQueue, achieved, achievements } from './ui/achievements.js';
+import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu.js';
 
 
         const canvas = document.getElementById('game');
@@ -330,6 +331,15 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             });
         }
         let lastTime = performance.now();
+
+        // ==================== ESC 暂停 ====================
+        // 独立标志、不占用时间倍率档（0 档会让 inputDt = dt/timeScale 除零）。
+        // 暂停时主循环跳过整条物理分支，渲染/网络/横幅计时照常跑——
+        // 画面冻结但页面活着，观战端看到的也是一致的冻结世界。
+        let paused = false;
+        function togglePauseMenu() {
+            paused = setPauseMenuOpen(!isPauseMenuOpen());
+        }
 
         // 飞船尺寸（米）—— 和其他一切共用同一个比例
         // 数值虽大（公里级），但和星球 1000 km 是同一把尺子，量纲自洽。
@@ -1890,6 +1900,14 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         }
 
         function onKeyDown(e) {
+            // ESC 开/关暂停菜单：放最顶上、观战白名单之前——观战端也要能
+            // 开菜单（音乐/成就/协同/回主菜单）；菜单开着时游戏键全部失效，
+            // 防止隔山打牛（隔菜单空格分级、点火）。
+            if (e.code === 'Escape') {
+                if (!e.repeat) togglePauseMenu();
+                return;
+            }
+            if (paused) return;
             if (isSpectator() && !spectatorAllows(e.code)) return;
             if (e.code === 'KeyA') { keys.left = true; return; }
             if (e.code === 'KeyD') { keys.right = true; return; }
@@ -2863,24 +2881,28 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 resetInterp();   // 观战端不做物理插值，直接渲染服务器插值结果
                 accumulator = 0;
             } else {
-                // 时间加速：把这一帧代表的「游戏时间」乘上倍率
-                accumulator += Math.min(frameTime, 0.25) * timeScale();
-                // 单帧最多跑这么多步，防止高倍率下卡死（超过就丢弃剩余时间）
-                const MAX_STEPS_PER_FRAME = 260;
-                let steps = 0;
-                if (accumulator >= FIXED_DT) {
-                    snapInterp();    // prev ← 本帧步进前的状态
-                    while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
-                        physicsStep(FIXED_DT);
-                        accumulator -= FIXED_DT;
-                        steps++;
+                // ESC 暂停：跳过整条物理分支（累加器冻结，插值状态留在原地，
+                // 画面即静止）。渲染/网络同步在分支外照常跑。
+                if (!paused) {
+                    // 时间加速：把这一帧代表的「游戏时间」乘上倍率
+                    accumulator += Math.min(frameTime, 0.25) * timeScale();
+                    // 单帧最多跑这么多步，防止高倍率下卡死（超过就丢弃剩余时间）
+                    const MAX_STEPS_PER_FRAME = 260;
+                    let steps = 0;
+                    if (accumulator >= FIXED_DT) {
+                        snapInterp();    // prev ← 本帧步进前的状态
+                        while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
+                            physicsStep(FIXED_DT);
+                            accumulator -= FIXED_DT;
+                            steps++;
+                        }
+                        snapInterp();    // curr ← 本帧步进后的状态
                     }
-                    snapInterp();    // curr ← 本帧步进后的状态
+                    if (accumulator > FIXED_DT * MAX_STEPS_PER_FRAME) {
+                        accumulator = 0;   // 追不上就丢弃，避免越积越多
+                    }
+                    interp.alpha = Math.max(0, Math.min(1, accumulator / FIXED_DT));
                 }
-                if (accumulator > FIXED_DT * MAX_STEPS_PER_FRAME) {
-                    accumulator = 0;   // 追不上就丢弃，避免越积越多
-                }
-                interp.alpha = Math.max(0, Math.min(1, accumulator / FIXED_DT));
             }
 
             // 和服务器同步：操控端上报，观战端拉取
@@ -3414,11 +3436,27 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 });
         }
     
+        // ==================== ESC 暂停菜单：接线 ====================
+        // 动作注入给 ui/pauseMenu.js（UI 模块不反向 import 组合根）。
+        // 除「继续游戏」外的菜单项执行时都会先关菜单（并经 onResume 解除暂停）。
+        initPauseMenu({
+            onResume: () => { paused = false; },
+            save: saveGame,
+            load: loadGame,
+            restart: respawnOnGround,
+            achievements: toggleAchievementPanel,
+            music: toggleBgm,
+            coop: showCoopInfo,
+            touch: toggleTouchPanel,
+            quit: () => { location.href = 'index.html'; },   // pagehide 自动存任务档
+        });
+
         // ==================== 模块化桥接 ====================
         // HTML 里的 onclick="..." 走全局作用域，而 ES Module 的顶层函数不是全局的，
         // 所以按钮引用到的函数必须手动挂到 window 上。
         Object.assign(window, {
             saveGame, loadGame, toggleAchievementPanel, toggleBgm, showCoopInfo, toggleTouchPanel,
+            togglePauseMenu,
         });
 
         // ==================== 测试钩子 ====================
@@ -3444,6 +3482,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             get debris() { return debris; },
             get timeScaleIdx() { return timeScaleIdx; },
             set timeScaleIdx(v) { timeScaleIdx = v; },   // 测试直接设档，避免按键推 toast 污染队列
+            get paused() { return paused; },
+            set paused(v) { paused = v; },
+            // 测试用：菜单开合与 paused 一并归零，防用例间泄漏（模块级 isOpen 粘滞）
+            resetPauseState() { paused = false; setPauseMenuOpen(false); },
             shipInfo, shipMass, thrustAccel, shipSpec, gravityAt, atmosphereDensity,
             setShipDef, placeOnSurface, applyImpact, splitVessel, checkSeparation,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,

@@ -41,6 +41,7 @@ function altitude() {
 
 // 恢复默认船、清残骸、贴地。每个场景开头调用，保证互不污染。
 function resetToGround() {
+    t.resetPauseState();   // 归零 ESC 菜单开合 + paused（模块级状态，防用例间泄漏）
     t.setShipDef({ version: 1, name: '默认船', parts: [
         { id: 'd1', type: 'engine',  x: 0, y: 0 },
         { id: 'd2', type: 'tank',    x: 0, y: 2 },
@@ -813,6 +814,89 @@ test('[分级] 侧挂分离器：切不断船体 → 整根脱离', () => {
     assert(det.def.parts.length === 1 && det.def.parts[0].type === 'decoupler', '单件小船');
     assert(t.severed.size === 0, 'severed 清空');
     resetToGround();
+});
+
+// ============================================================
+
+console.log('\n== ESC 暂停菜单 ==');
+
+const ESC_DOWN = { code: 'Escape', repeat: false, preventDefault() {} };
+
+test('ESC 开合暂停：paused 随之切换，键盘自动重复不翻转', () => {
+    resetToGround();
+    t.onKeyDown(ESC_DOWN);
+    assert(t.paused === true, '按 ESC 后应处于暂停');
+    t.onKeyDown({ code: 'Escape', repeat: true, preventDefault() {} });
+    assert(t.paused === true, 'repeat 的 ESC 不应翻转暂停');
+    t.onKeyDown(ESC_DOWN);
+    assert(t.paused === false, '再按 ESC 应解除暂停');
+});
+
+test('暂停中物理冻结：点火后暂停位置不动，恢复后继续上升', () => {
+    resetToGround();
+    t.toggleEngine();                       // 点火起飞
+    t.paused = true;
+    const d0 = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
+    env.pumpFrames(30);
+    const d1 = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
+    assert(d1 === d0, `暂停中 30 帧船不应移动（位移 ${d1 - d0}）`);
+    t.paused = false;
+    env.pumpFrames(30);
+    const d2 = Math.hypot(rocket.x - planet.x, rocket.y - planet.y);
+    assert(d2 > d1, '恢复后船应继续上升');
+    assertFinite(rocket, ['x', 'y', 'vx', 'vy'], 'rocket');
+    t.toggleEngine();                       // 关机，别把点火状态带给下个用例
+    resetToGround();
+});
+
+test('菜单开着时游戏键全部失效（防隔山打牛），恢复后生效', () => {
+    resetToGround();
+    t.onKeyDown(ESC_DOWN);                  // 暂停
+    t.onKeyDown({ code: 'KeyE', repeat: false, preventDefault() {} });
+    assert(rocket.state !== 'firing', '暂停中不应能点火');
+    const achEl = env.elements.get('achievement-panel');
+    t.onKeyDown({ code: 'KeyC', repeat: false, preventDefault() {} });
+    assert(achEl.style.display !== 'block', '暂停中不应能打开成就面板');
+    t.onKeyDown(ESC_DOWN);                  // 恢复
+    assert(t.paused === false, '再按 ESC 应恢复');
+    t.onKeyDown({ code: 'KeyE', repeat: false, preventDefault() {} });
+    assert(rocket.state === 'firing', '恢复后点火应生效');
+    t.onKeyDown({ code: 'KeyC', repeat: false, preventDefault() {} });
+    assert(achEl.style.display === 'block', '恢复后成就面板应能打开');
+    t.onKeyDown({ code: 'KeyC', repeat: false, preventDefault() {} });   // 关面板
+    t.toggleEngine();                       // 关机
+    resetToGround();
+});
+
+test('暂停/恢复不改时间倍率档位', () => {
+    resetToGround();
+    t.timeScaleIdx = 3;
+    t.onKeyDown(ESC_DOWN);
+    t.onKeyDown(ESC_DOWN);
+    assert(t.timeScaleIdx === 3, `暂停/恢复不应改倍率档，现在是 ${t.timeScaleIdx}`);
+    t.timeScaleIdx = 0;
+});
+
+test('window.togglePauseMenu 桥接存在（触控端 ☰ 按钮依赖）', () => {
+    resetToGround();
+    assert(typeof window.togglePauseMenu === 'function', 'window.togglePauseMenu 应存在');
+    window.togglePauseMenu();
+    assert(t.paused === true, '桥接开菜单应同步暂停');
+    window.togglePauseMenu();
+    assert(t.paused === false, '桥接关菜单应解除暂停');
+});
+
+test('菜单开着泵帧无帧错误（帧守卫）', () => {
+    resetToGround();
+    window.__lastGameError = undefined;     // __lastGameError 粘滞，先清基线
+    t.onKeyDown(ESC_DOWN);
+    env.pumpFrames(60);
+    assert(window.__lastGameError === undefined || window.__lastGameError === null,
+           '暂停期间渲染循环不应抛错: ' + (window.__lastGameError && window.__lastGameError.message));
+    t.onKeyDown(ESC_DOWN);
+    env.pumpFrames(10);
+    assert(window.__lastGameError === undefined || window.__lastGameError === null,
+           '恢复后渲染循环不应抛错');
 });
 
 // ============================================================
