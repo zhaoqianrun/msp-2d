@@ -20,6 +20,7 @@ export const achievements = [
     { id: 'burned_up',         name: '火烧眉毛',   desc: '再入时部件被高温烧毁' },
     { id: 'capsule_survives',  name: '返回舱幸存', desc: '其它部件全烧光，控制舱还挺着' },
     { id: 'chute_open',        name: '空中开花',   desc: '第一次展开降落伞' },
+    { id: 'first_staging',     name: '分级飞行',   desc: '第一次用分离器抛离下级' },
     { id: 'meteor',            name: '流星',       desc: '以超过 400 px/s 冲进大气层' },
     { id: 'split_vessel',      name: '断成两截',   desc: '飞船在太空中分离成多个航天器' },
     { id: 'derelict_keeper',   name: '太空垃圾场', desc: '同时存在 3 个以上航天器' },

@@ -165,6 +165,12 @@ const PART_TYPES = {
         body: '#ff9a3c', edge: '#c46a1a', accent: '#ffe0a0',
         info: '减速伞：游戏中按 P 展开 / 切断',
     },
+    decoupler: {
+        // 分离器：游戏中按空格切断，下级沿船轴抛离（分级火箭）。
+        name: '分离器', w: 2, h: 2, mass: 4, fuel: 0, thrust: 0,
+        body: '#5a6570', edge: '#3a424a', accent: '#ffd23c',
+        info: '分级分离：游戏中按 空格 切断',
+    },
 };
 
 const GRID = 20;              // 一格多少像素
@@ -512,6 +518,18 @@ function drawPart(p, isSelected) {
         // 顶部开伞扣
         ctx.fillStyle = t.accent;
         ctx.fillRect(r.x + r.w * 0.35, r.y - 1, r.w * 0.3, Math.max(2, r.h * 0.08));
+
+    } else if (p.type === 'decoupler') {
+        // 分离器：深灰扁环 + 黄色警示条纹
+        const grad = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+        grad.addColorStop(0, '#31383f'); grad.addColorStop(0.4, t.body); grad.addColorStop(1, '#3a424a');
+        roundRect(ctx, r.x, r.y, r.w, r.h, 3);
+        ctx.fillStyle = grad; ctx.fill();
+        ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = t.accent;
+        const bandH = Math.max(2, r.h * 0.18);
+        ctx.fillRect(r.x + 2, r.y + r.h * 0.2, r.w - 4, bandH);
+        ctx.fillRect(r.x + 2, r.y + r.h * 0.62, r.w - 4, bandH);
 
     } else if (p.type === 'engine') {
         // 发动机：上方圆柱 + 下方喷口

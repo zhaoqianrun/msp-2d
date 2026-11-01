@@ -915,6 +915,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         }
         let partHP = initPartHP();
         let destroyed = new Set();    // 已经炸掉的部件 id
+        let severed = new Set();      // 已被分离器切断的部件 id：还活着还画着，
+                                      // 但不再把两侧粘在一起（与 destroyed 分开算）
 
         // 撞了一下：按撞击速度给所有部件掉耐久，太狠的直接炸。
         // 用「单次撞击配额」避免连续弹跳把伤害累积起来 ——
@@ -1005,9 +1007,12 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             return blew;
         }
 
+        // 炸毁 ∪ 切断：两者都不再把部件粘在一起（分离器切断用）
+        function allDead() { return new Set([...destroyed, ...severed]); }
+
         // 炸完之后检查：船是不是断成几截了
         function checkSeparation() {
-            if (findConnectedGroups(shipDef.parts, destroyed).length > 1) {
+            if (findConnectedGroups(shipDef.parts, allDead()).length > 1) {
                 splitVessel();
                 if (vessels.length >= 3) unlock('derelict_keeper');
             }
@@ -1091,6 +1096,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             vessels = vessels.filter(v => v.id === activeVesselId);
             // 修好所有部件
             destroyed.clear();
+            severed.clear();
             partHP = initPartHP();
             partTemp = initPartTemp();
             debris = [];
@@ -1140,6 +1146,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             pristineShip = JSON.parse(JSON.stringify(def));   // 重置（R）时回到这艘
             SPEC = shipSpec(shipDef);
             destroyed = new Set();
+            severed.clear();   // 新船没有已切断的分离器
             partHP = initPartHP();
             partTemp = initPartTemp();
             invalidateShipCache();
@@ -1342,8 +1349,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
         // 把当前飞船按「还连在一起的部件」拆成若干航天器
         // 返回新产生的那些（不含仍然操控中的那艘）
-        function splitVessel() {
-            const groups = findConnectedGroups(shipDef.parts, destroyed);
+        function splitVessel(axial) {
+            const groups = findConnectedGroups(shipDef.parts, allDead());
             if (groups.length <= 1) return [];
 
             // 挑出有控制舱的那组当主角；没有就挑最大的那组
@@ -1419,12 +1426,26 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             });
 
             // 分离本身给两边一点推开的力
-            const push = 30;
-            rocket.vx += (Math.random() - 0.5) * push;
-            rocket.vy += (Math.random() - 0.5) * push;
-            for (const v of born) {
-                v.vx -= (Math.random() - 0.5) * push;
-                v.vy -= (Math.random() - 0.5) * push;
+            if (axial) {
+                // 分离器分级：沿船体轴向确定性分离——下级向船尾抛出，主机反冲。
+                // 轴向冲量是分级手感的灵魂：干净、可控、不翻滚。
+                const a = (rocket.angle - 90) * Math.PI / 180;
+                const downX = -Math.sin(a), downY = Math.cos(a);
+                rocket.vx -= downX * 3;
+                rocket.vy -= downY * 3;
+                for (const v of born) {
+                    v.vx += downX * 12;
+                    v.vy += downY * 12;
+                    v.spin = (Math.random() - 0.5) * 15;
+                }
+            } else {
+                const push = 30;
+                rocket.vx += (Math.random() - 0.5) * push;
+                rocket.vy += (Math.random() - 0.5) * push;
+                for (const v of born) {
+                    v.vx -= (Math.random() - 0.5) * push;
+                    v.vy -= (Math.random() - 0.5) * push;
+                }
             }
 
             toastQueue.push({
@@ -1517,6 +1538,91 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 name: '没有可接管的航天器',
                 desc: '只有带控制舱的船可以接管（炸断船体可获得多截）',
             });
+        }
+
+        // ==================== 分离器（分级火箭）====================
+        // 空格：切断最下面一根「切得断船体」的分离器——下级沿船轴抛离，
+        // 上面级继续飞。切断 ≠ 炸毁：分离器本体还活着，只是不再把两侧
+        // 粘在一起（severed 集合），并跟随被抛离的那一级走。
+        function activateDecoupler() {
+            const candidates = shipDef.parts
+                .filter(p => p.type === 'decoupler' && !destroyed.has(p.id) && !severed.has(p.id))
+                .sort((a, b) => b.y - a.y);          // 分级惯例：先抛最下面一级（y 轴向上，底级 y 最大）
+            if (candidates.length === 0) {
+                toastQueue.push({ title: '没 有 分 离 器', name: '造船厂里装一个吧', desc: '部件列表 > 分离器' });
+                return;
+            }
+            // 找出真能把船体切成两截的那根（侧挂的切不断 → 整根自己飘走）
+            let chosen = null;
+            for (const d of candidates) {
+                severed.add(d.id);
+                if (findConnectedGroups(shipDef.parts, allDead()).length > 1) { chosen = d; break; }
+                severed.delete(d.id);
+            }
+            if (!chosen) {
+                severed.add(candidates[0].id);
+                detachSeveredParts();
+                toastQueue.push({ title: '分 离 器 脱 离', name: '它不在连接位置上', desc: '整根自己飘走了' });
+                unlock('first_staging');
+                return;
+            }
+            const before = vessels.length;
+            splitVessel(true);
+            // 被切断的分离器本体跟下级走：分离时它不在任何连通组里
+            //（severed 被连通计算排除），splitVessel 重设 shipDef 后它就成了
+            // 「无主部件」—— 用 chosen 的对象引用把它挂到相邻的非主船那截上。
+            const ty = PART_TYPES.decoupler;
+            const home = vessels.find(v => v.id !== activeVesselId && v.def.parts.some(q => {
+                const qt = PART_TYPES[q.type];
+                return chosen.x <= q.x + qt.w + 1 && chosen.x + ty.w >= q.x - 1 &&
+                       chosen.y <= q.y + qt.h + 1 && chosen.y + ty.h >= q.y - 1;
+            }));
+            if (home) {
+                home.def.parts.push(chosen);
+                home.spec = shipSpec(home.def);
+                home.hp[chosen.id] = PART_HP.decoupler || 80;
+                home.temp[chosen.id] = AMBIENT_TEMP;
+            }
+            severed.delete(chosen.id);
+            invalidateShipCache();
+            lastComFuel = -1;
+            if (vessels.length > before) {
+                unlock('first_staging');
+                toastQueue.push({
+                    title: '级 间 分 离',
+                    name: '下级已抛离',
+                    desc: '上面级继续飞行，按 V 可切换目标',
+                });
+            } else {
+                severed.delete(chosen.id);   // 兜底：没分成就不算切断
+            }
+        }
+
+        // 侧挂 / 末端的分离器切不断船体：整个脱离成一艘单件小船
+        function detachSeveredParts() {
+            const loose = shipDef.parts.filter(p => severed.has(p.id));
+            if (loose.length === 0) return;
+            shipDef.parts = shipDef.parts.filter(p => !severed.has(p.id));
+            SPEC = shipSpec(shipDef);
+            const v = makeVessel(loose, rocket.x, rocket.y, rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
+            v.def.name = '分离器';
+            // 沿「部件相对船体质心的方向」弹开
+            const P = PART_PX;
+            const ty = PART_TYPES[loose[0].type];
+            const cxL = (loose[0].x + ty.w / 2 - SPEC.centerX) * P;
+            const cyL = (SPEC.box.maxY - (loose[0].y + ty.h / 2)) * P;
+            const a = (rocket.angle - 90) * Math.PI / 180;
+            const wx = rocket.x + (cxL - SPEC.com.x) * Math.cos(a) - (cyL - SPEC.com.y) * Math.sin(a);
+            const wy = rocket.y + (cxL - SPEC.com.x) * Math.sin(a) + (cyL - SPEC.com.y) * Math.cos(a);
+            v.x = wx; v.y = wy;
+            const ddx = wx - rocket.x, ddy = wy - rocket.y;
+            const dl = Math.hypot(ddx, ddy) || 1;
+            v.vx = rocket.vx + (ddx / dl) * 10;
+            v.vy = rocket.vy + (ddy / dl) * 10;
+            for (const p of loose) severed.delete(p.id);
+            invalidateShipCache();
+            lastComFuel = -1;
+            vessels.push(v);
         }
 
         // 失控航天器：走**和玩家船同一套**物理（引力/大气阻力/撞击损伤/再入加热）
@@ -1698,6 +1804,11 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (e.code === 'Period') { cycleTimeScale(1); return; }
             if (e.code === 'KeyT') { toggleTouchPanel(); return; }
             if (e.code === 'KeyV') cycleVessel();
+            if (e.code === 'Space') {
+                e.preventDefault();   // 防止空格滚动页面
+                activateDecoupler();
+                return;
+            }
             if (e.code === 'KeyP') toggleChute();
             if (e.code === 'KeyE') toggleEngine();
             if (e.code === 'KeyS') saveGame();
@@ -1741,6 +1852,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             ['t-ignite', 'KeyE'],
             ['t-zoom-in', 'BracketRight'], ['t-zoom-out', 'BracketLeft'],
             ['t-fuel', 'Equal'], ['t-dump', 'Minus'], ['t-chute', 'KeyP'], ['t-vessel', 'KeyV'],
+            ['t-sep', 'Space'],
         ];
 
         touchButtons.forEach((pair) => {
@@ -2563,6 +2675,18 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 // 顶部开伞扣
                 c.fillStyle = t.accent;
                 c.fillRect(x + w * 0.35, y - 1, w * 0.3, Math.max(2, h * 0.08));
+
+            } else if (type === 'decoupler') {
+                // 分离器：深灰扁环 + 黄色警示条纹（按空格切断）
+                const grad = c.createLinearGradient(x, 0, x + w, 0);
+                grad.addColorStop(0, '#31383f'); grad.addColorStop(0.4, t.body); grad.addColorStop(1, '#3a424a');
+                shipRoundRect(c, x, y, w, h, Math.min(3, h * 0.3));
+                c.fillStyle = grad; c.fill();
+                c.strokeStyle = t.edge; c.lineWidth = 1; c.stroke();
+                c.fillStyle = t.accent;
+                const bandH = Math.max(1.5, h * 0.18);
+                c.fillRect(x + 1, y + h * 0.2, w - 2, bandH);
+                c.fillRect(x + 1, y + h * 0.62, w - 2, bandH);
             }
         }
 
@@ -3156,7 +3280,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
             onKeyDown, blowUpPart, predictPath, rocketRenderPos, resetInterp,
             toggleChute, hasChute, shipTiltDeg, sanitizeShipDef, activateVessel, cycleVessel, vesselHasCapsule,
-            archiveCurrentShip,
+            archiveCurrentShip, activateDecoupler,
+            get severed() { return severed; },
             get chuteState() { return chuteState; },
             set chuteState(v) { chuteState = v; },   // 测试直接设伞状态
             get chuteDragNow() { return chuteDragNow; },

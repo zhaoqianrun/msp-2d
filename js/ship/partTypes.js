@@ -18,6 +18,10 @@ export const PART_TYPES = {
     // 切断的伞不能再展开，必须降落到地面才能重新包好。
     chute:   { name: '降落伞', w: 2, h: 2, mass: 8, fuel: 0, thrust: 0,
                body: '#ff9a3c', edge: '#c46a1a', accent: '#ffe0a0' },
+    // 分离器：夹在两级之间的扁环。游戏中按空格切断——下级沿船轴抛离，
+    // 上面级继续飞（分级火箭）。切断 ≠ 炸毁：本体还活着，跟着被抛的那级走。
+    decoupler: { name: '分离器', w: 2, h: 2, mass: 4, fuel: 0, thrust: 0,
+                 body: '#5a6570', edge: '#3a424a', accent: '#ffd23c' },
     engine:  { name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000,
                body: '#8d99a8', edge: '#5c6874', accent: '#ff5544' },
 };

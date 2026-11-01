@@ -80,7 +80,7 @@ export const LANDING_SPEED = 180;    // 扎向地面的速度小于它就稳稳�
 // 每个部件的耐久不同：燃料箱厚实，控制舱脆一些。
 export const DAMAGE_SPEED = 120;     // 超过这个撞击速度才开始受损
 export const DESTROY_SPEED = 700;    // px/s，撞得这么快才当场解体（原来 420 太低，正常降落都可能触发）
-export const PART_HP = { capsule: 90, tank: 130, engine: 120 };
+export const PART_HP = { capsule: 90, tank: 130, engine: 120, chute: 60, decoupler: 50 };
 
 
 // ==================== 再入热损毁 ====================

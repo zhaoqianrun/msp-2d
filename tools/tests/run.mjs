@@ -735,6 +735,73 @@ test('[多船] 新发射归档：换船不覆盖旧船，两船可切换', () =>
     resetToGround();
 });
 
+test('[分级] 空格切断：下级沿船轴抛离、血量无损', () => {
+    t.setShipDef({ version: 1, name: '分级船', parts: [
+        { id: 's1', type: 'capsule',   x: 0, y: 0 },
+        { id: 's2', type: 'tank',      x: 0, y: 2 },
+        { id: 's3', type: 'decoupler', x: 0, y: 5 },
+        { id: 's4', type: 'tank',      x: 0, y: 7 },
+        { id: 's5', type: 'engine',    x: 0, y: 10 },
+    ]});
+    t.vessels.splice(1);
+    t.resetInterp();
+    const hpBefore = JSON.parse(JSON.stringify(t.partHP));
+    t.activateDecoupler();
+    assert(t.vessels.length === 2, '应分成两级, got ' + t.vessels.length);
+    assert(t.shipDef.parts.some(p => p.id === 's1') && !t.shipDef.parts.some(p => p.id === 's5'),
+           '主船应是上面级（含控制舱）');
+    const born = t.vessels[1];
+    assert(born.def.parts.some(p => p.id === 's3'), '分离器本体应跟下级走');
+    assert(born.def.parts.some(p => p.id === 's5'), '下级含发动机');
+    // 轴向分离：下级向船尾方向 15px/s（下级 +12、主机反冲 -3）
+    near(born.vy - t.rocket.vy, 15, 2, '轴向分离相对速度');
+    // 分级不是爆炸：上面级血量无损
+    for (const p of t.shipDef.parts) {
+        near(t.partHP[p.id], hpBefore[p.id], 1e-6, '血量无损 ' + p.id);
+    }
+    assert(t.severed.size === 0, 'severed 应随下级清空');
+    resetToGround();
+});
+
+test('[分级] 多级串联：两次空格 → 三截', () => {
+    t.setShipDef({ version: 1, name: '三级船', parts: [
+        { id: 't1', type: 'capsule',   x: 0, y: 0 },
+        { id: 't2', type: 'tank',      x: 0, y: 2 },
+        { id: 'd1', type: 'decoupler', x: 0, y: 5 },
+        { id: 't3', type: 'tank',      x: 0, y: 7 },
+        { id: 'd2', type: 'decoupler', x: 0, y: 10 },
+        { id: 't4', type: 'tank',      x: 0, y: 12 },
+        { id: 't5', type: 'engine',    x: 0, y: 15 },
+    ]});
+    t.vessels.splice(1);
+    t.resetInterp();
+    t.activateDecoupler();   // 先抛最下面一级（y 最大的分离器）
+    assert(t.vessels.length === 2, '第一级分离');
+    assert(t.shipDef.parts.some(p => p.id === 'd1'), '上面的分离器应留在主船上等待下次分级');
+    t.activateDecoupler();   // 再抛中间级
+    assert(t.vessels.length === 3, '第二级分离');
+    assert(t.shipDef.parts.length === 2, '主船只剩上面级');
+    assert(t.severed.size === 0, 'severed 清空');
+    resetToGround();
+});
+
+test('[分级] 侧挂分离器：切不断船体 → 整根脱离', () => {
+    t.setShipDef({ version: 1, name: '侧挂船', parts: [
+        { id: 'w1', type: 'capsule',   x: 0, y: 0 },
+        { id: 'w2', type: 'engine',    x: 0, y: 2 },
+        { id: 'w3', type: 'decoupler', x: 20, y: 0 },
+    ]});
+    t.vessels.splice(1);
+    t.resetInterp();
+    t.activateDecoupler();
+    assert(t.vessels.length === 2, '分离器应自成一小船');
+    assert(t.shipDef.parts.length === 2, '主船不再含分离器');
+    const det = t.vessels[1];
+    assert(det.def.parts.length === 1 && det.def.parts[0].type === 'decoupler', '单件小船');
+    assert(t.severed.size === 0, 'severed 清空');
+    resetToGround();
+});
+
 // ============================================================
 
 console.log('\n==========================================');
