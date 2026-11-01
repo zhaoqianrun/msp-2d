@@ -12,6 +12,8 @@ station.html        观察站（内联脚本，暂未模块化）
 index.html          主菜单
 server.py           协同服务器：静态文件 + /api/*（存档/飞船/操控权/世界状态广播）
 
+ui/shared.css       全站 UI tokens + 原语（唯一事实源；四页 link 引入，页面内不再自带 tokens）
+
 js/
   main.js           组合根：游戏状态、物理步、输入、渲染循环、网络、存档都在这（~2400 行）
   core/constants.js 全部物理/尺度常量（唯一来源；各段注释解释互相约束，别单改一个数）
