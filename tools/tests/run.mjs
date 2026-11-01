@@ -43,9 +43,9 @@ function altitude() {
 function resetToGround() {
     t.resetPauseState();   // 归零 ESC 菜单开合 + paused（模块级状态，防用例间泄漏）
     t.setShipDef({ version: 1, name: '默认船', parts: [
-        { id: 'd1', type: 'engine',  x: 0, y: 0 },
-        { id: 'd2', type: 'tank',    x: 0, y: 2 },
-        { id: 'd3', type: 'capsule', x: 0, y: 5 },
+        { id: 'd1', type: 'engine', x: 0, y: 0 },
+        { id: 'd2', type: 'tank', x: 0, y: 4 },
+        { id: 'd3', type: 'capsule', x: 0, y: 10 },
     ]});
     t.vessels.splice(1);   // 清掉分离出的残骸，只留主船
     env.pumpFrames(2);
@@ -141,9 +141,9 @@ test('[eef4497] 部件全毁：强制熄火、油门归零、「任务失败」�
 test('[cf2350a] 换船：血量表按新部件 id 重建，撞击不再免疫（NaN 回归）', () => {
     resetToGround();
     t.setShipDef({ version: 1, name: '测试船', parts: [
-        { id: 'x-engine',  type: 'engine',  x: 0, y: 0 },
-        { id: 'x-tank',    type: 'tank',    x: 0, y: 2 },
-        { id: 'x-capsule', type: 'capsule', x: 0, y: 5 },
+        { id: 'x-engine', type: 'engine', x: 0, y: 0 },
+        { id: 'x-tank', type: 'tank', x: 0, y: 4 },
+        { id: 'x-capsule', type: 'capsule', x: 0, y: 10 },
     ]});
     const keys = Object.keys(t.partHP).sort().join(',');
     assert(keys === 'x-capsule,x-engine,x-tank', '血量表 key 应为新 id，got: ' + keys);
@@ -184,31 +184,31 @@ const { fmtDistance: fmtDist, fmtSpeed: fmtSpd } = await import('../../js/core/f
 test('[partTypes] 部件数据：发动机推力 1000、油箱容量 40（与物理口径一致）', () => {
     assert(PART_TYPES.engine.thrust === 1000, 'engine.thrust=' + PART_TYPES.engine.thrust);
     assert(PART_TYPES.tank.fuel === 40, 'tank.fuel=' + PART_TYPES.tank.fuel);
-    assert(PART_PX === 7, 'PART_PX=' + PART_PX);
+    assert(PART_PX === 3.5, 'PART_PX=' + PART_PX);
 });
 
 test('[shipSpec] 默认船：干重75/油容40/推力1000，14×49m，8 个碰撞点', () => {
     const def = { version: 1, name: 't', parts: [
-        { id: 'a', type: 'engine',  x: 0, y: 0 },
-        { id: 'b', type: 'tank',    x: 0, y: 2 },
-        { id: 'c', type: 'capsule', x: 0, y: 5 },
+        { id: 'a', type: 'engine', x: 0, y: 0 },
+        { id: 'b', type: 'tank', x: 0, y: 4 },
+        { id: 'c', type: 'capsule', x: 0, y: 10 },
     ]};
     const s = shipSpec(def);
     assert(s.dryMass === 75, 'dryMass=' + s.dryMass);
     assert(s.fuelCap === 40, 'fuelCap=' + s.fuelCap);
     assert(s.thrust === 1000, 'thrust=' + s.thrust);
     assert(s.width === 14 && s.height === 49, `尺寸 ${s.width}×${s.height}`);
-    assert(s.box.minX === 0 && s.box.maxX === 2 && s.box.minY === 0 && s.box.maxY === 7,
+    assert(s.box.minX === 0 && s.box.maxX === 4 && s.box.minY === 0 && s.box.maxY === 14,
            '包围盒 ' + JSON.stringify(s.box));
     assert(s.corners.length === 8, '碰撞点数=' + s.corners.length);
-    assert(s.centerX === 1 && s.bottomY === 0, '中轴/底面');
+    assert(s.centerX === 2 && s.bottomY === 0, '中轴/底面');
 });
 
 test('[shipSpec] 质心随燃料前移（满油 23.74 → 空油 23.33）', () => {
     const def = { version: 1, name: 't', parts: [
-        { id: 'a', type: 'engine',  x: 0, y: 0 },
-        { id: 'b', type: 'tank',    x: 0, y: 2 },
-        { id: 'c', type: 'capsule', x: 0, y: 5 },
+        { id: 'a', type: 'engine', x: 0, y: 0 },
+        { id: 'b', type: 'tank', x: 0, y: 4 },
+        { id: 'c', type: 'capsule', x: 0, y: 10 },
     ]};
     const s = shipSpec(def);
     const full = shipCenterOfMass(def, s, p => PART_TYPES[p.type].fuel);   // 满油
@@ -312,14 +312,14 @@ test('[6938f81] 100x 加速下横幅按真实时间显示 3 秒', () => {
 test('[c54de99] 分离摆位：分离瞬间发动机与控制舱的世界位置保持不变', () => {
     resetToGround();
     env.pumpFrames(3);
-    const P = 7;
+    const P = 3.5;
     const a0 = (t.rocket.angle - 90) * Math.PI / 180;
     const worldOf = (lx, ly) => ({
         x: t.rocket.x + (lx - t.SPEC.com.x) * Math.cos(a0) - (ly - t.SPEC.com.y) * Math.sin(a0),
         y: t.rocket.y + (lx - t.SPEC.com.x) * Math.sin(a0) + (ly - t.SPEC.com.y) * Math.cos(a0),
     });
-    const engineW = worldOf((0 + 1 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (0 + 1)) * P);
-    const capsuleW = worldOf((0 + 1 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (5 + 1)) * P);
+    const engineW = worldOf((0 + 2 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (0 + 2)) * P);
+    const capsuleW = worldOf((0 + 2 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (5 + 1)) * P);
 
     t.destroyed.add('d2');
     t.invalidateShipCache();
@@ -330,7 +330,7 @@ test('[c54de99] 分离摆位：分离瞬间发动机与控制舱的世界位置�
     near(born.x, engineW.x, 1e-3, '发动机世界 X');
     near(born.y, engineW.y, 1e-3, '发动机世界 Y');
     // 主段（控制舱）锚点也挪过：舱体世界位置同样不变
-    const capsuleAfter = worldOf((0 + 1 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (5 + 1)) * P);
+    const capsuleAfter = worldOf((0 + 2 - t.SPEC.centerX) * P, (t.SPEC.box.maxY - (5 + 1)) * P);
     near(capsuleAfter.x, capsuleW.x, 1e-3, '控制舱世界 X');
     near(capsuleAfter.y, capsuleW.y, 1e-3, '控制舱世界 Y');
     resetToGround();
@@ -339,9 +339,9 @@ test('[c54de99] 分离摆位：分离瞬间发动机与控制舱的世界位置�
 test('[燃料] 油箱被炸：油跟箱子走，不留幽灵燃料（按箱模型）', () => {
     t.setShipDef({ version: 1, name: '双箱船', parts: [
         { id: 'g1', type: 'capsule', x: 0, y: 0 },
-        { id: 'g2', type: 'tank',    x: 0, y: 2 },
-        { id: 'g3', type: 'tank',    x: 0, y: 5 },
-        { id: 'g4', type: 'engine',  x: 0, y: 8 },
+        { id: 'g2', type: 'tank', x: 0, y: 4 },
+        { id: 'g3', type: 'tank', x: 0, y: 10 },
+        { id: 'g4', type: 'engine', x: 0, y: 16 },
     ]});
     t.vessels.splice(1);
     t.resetInterp();
@@ -490,7 +490,7 @@ test('[插值] 240Hz 帧节拍下渲染位置逐帧连续（旧实现 75% 帧零
 test('[降落伞] 状态机：展开 → 切断 → 落地重包', () => {
     t.setShipDef({ version: 1, name: '伞船', parts: [
         { id: 'c1', type: 'capsule', x: 0, y: 0 },
-        { id: 'c2', type: 'chute',   x: 0, y: 2 },
+        { id: 'c2', type: 'chute', x: 0, y: 4 },
     ]});
     t.resetInterp();
     assert(t.hasChute() === true, '应有伞');
@@ -518,7 +518,7 @@ test('[降落伞] 展开后减速远强于收起（10km 高、下落 800px/s）'
     const fall = (deploy) => {
         t.setShipDef({ version: 1, name: '伞船', parts: [
             { id: 'c1', type: 'capsule', x: 0, y: 0 },
-            { id: 'c2', type: 'chute',   x: 0, y: 2 },
+            { id: 'c2', type: 'chute', x: 0, y: 4 },
         ]});
         t.resetInterp();
         t.rocket.x = planet.x;
@@ -553,11 +553,11 @@ test('[造船] 悬空零件载入过滤：保留含控制舱的连通组', () =>
     // 用户实测的坏船：主船 + 三个悬空降落伞（截图 bug）
     const bad = { version: 1, name: '坏船', parts: [
         { id: 'm1', type: 'capsule', x: 0, y: 0 },
-        { id: 'm2', type: 'tank',    x: 0, y: 2 },
-        { id: 'm3', type: 'engine',  x: 0, y: 5 },
-        { id: 'f1', type: 'chute',   x: 20, y: 0 },
-        { id: 'f2', type: 'chute',   x: 22, y: 0 },
-        { id: 'f3', type: 'chute',   x: 24, y: 0 },
+        { id: 'm2', type: 'tank', x: 0, y: 4 },
+        { id: 'm3', type: 'engine', x: 0, y: 10 },
+        { id: 'f1', type: 'chute', x: 40, y: 0 },
+        { id: 'f2', type: 'chute', x: 44, y: 0 },
+        { id: 'f3', type: 'chute', x: 48, y: 0 },
     ]};
     const fixed = t.sanitizeShipDef(bad);
     assert(fixed.dropped === 3, '应丢弃 3 个悬空件, got ' + fixed.dropped);
@@ -565,9 +565,9 @@ test('[造船] 悬空零件载入过滤：保留含控制舱的连通组', () =>
     assert(fixed.def.parts.some(p => p.type === 'capsule'), '保留组应含控制舱');
     // 含控制舱的小组 优先于 无控制舱的大组
     const bad2 = { version: 1, name: 'x', parts: [
-        { id: 'a', type: 'tank',    x: 0, y: 0 },
-        { id: 'b', type: 'tank',    x: 0, y: 3 },
-        { id: 'c', type: 'capsule', x: 30, y: 0 },
+        { id: 'a', type: 'tank', x: 0, y: 0 },
+        { id: 'b', type: 'tank', x: 0, y: 6 },
+        { id: 'c', type: 'capsule', x: 60, y: 0 },
     ]};
     const fixed2 = t.sanitizeShipDef(bad2);
     assert(fixed2.def.parts.length === 1 && fixed2.def.parts[0].type === 'capsule',
@@ -576,7 +576,7 @@ test('[造船] 悬空零件载入过滤：保留含控制舱的连通组', () =>
     // 正常船不受影响
     assert(t.sanitizeShipDef({ version: 1, name: 'ok', parts: [
         { id: 'k1', type: 'capsule', x: 0, y: 0 },
-        { id: 'k2', type: 'engine',  x: 0, y: 2 },
+        { id: 'k2', type: 'engine', x: 0, y: 4 },
     ]}).dropped === 0, '连通船不应被修整');
     resetToGround();
 });
@@ -584,17 +584,17 @@ test('[造船] 悬空零件载入过滤：保留含控制舱的连通组', () =>
 test('[多船] activateVessel：接管残骸、旧主船降级、可切回（部件世界位置全程不变）', () => {
     // 双舱船：炸掉中间油箱 → 分成两截，born 截必含控制舱
     t.setShipDef({ version: 1, name: '双舱船', parts: [
-        { id: 'p1', type: 'tank',    x: 0, y: 0 },
-        { id: 'p2', type: 'capsule', x: 0, y: 2 },
-        { id: 'p3', type: 'tank',    x: 0, y: 5 },
-        { id: 'p4', type: 'capsule', x: 0, y: 7 },
+        { id: 'p1', type: 'tank', x: 0, y: 0 },
+        { id: 'p2', type: 'capsule', x: 0, y: 6 },
+        { id: 'p3', type: 'tank', x: 0, y: 10 },
+        { id: 'p4', type: 'capsule', x: 0, y: 16 },
     ]});
     t.resetInterp();
     // 部件世界坐标 = 锚点 + 旋转(本地 - 质心)——分离/接管/切回全程不应变化
     const partWorld = (spec, rk, p) => {
         const ty = PART_TYPES[p.type];
-        const lx = (p.x + ty.w / 2 - spec.centerX) * 7;
-        const ly = (spec.box.maxY - (p.y + ty.h / 2)) * 7;
+        const lx = (p.x + ty.w / 2 - spec.centerX) * 3.5;
+        const ly = (spec.box.maxY - (p.y + ty.h / 2)) * 3.5;
         const a = (rk.angle - 90) * Math.PI / 180;
         return {
             x: rk.x + (lx - spec.com.x) * Math.cos(a) - (ly - spec.com.y) * Math.sin(a),
@@ -703,9 +703,9 @@ test('[多船] 船-船碰撞：相互推开、不穿过、高速互撞掉血', (
 
 test('[多船] 带伤分离：血量从主船表切过去，不再满血复活', () => {
     t.setShipDef({ version: 1, name: '三节船', parts: [
-        { id: 'e1', type: 'engine',  x: 0, y: 0 },
-        { id: 'm1', type: 'tank',    x: 0, y: 2 },
-        { id: 'k1', type: 'capsule', x: 0, y: 5 },
+        { id: 'e1', type: 'engine', x: 0, y: 0 },
+        { id: 'm1', type: 'tank', x: 0, y: 4 },
+        { id: 'k1', type: 'capsule', x: 0, y: 10 },
     ]});
     t.vessels.splice(1);      // 多船时代 setShipDef 不清世界：测试要自己清场上残骸
     t.resetInterp();
@@ -734,7 +734,7 @@ test('[多船] 新发射归档：换船不覆盖旧船，两船可切换', () =>
     // 换新船（带发射台偏移验证：旧船停在发射台，新船应挪开）
     t.setShipDef({ version: 1, name: '新船', parts: [
         { id: 'n1', type: 'capsule', x: 0, y: 0 },
-        { id: 'n2', type: 'engine',  x: 0, y: 2 },
+        { id: 'n2', type: 'engine', x: 0, y: 4 },
     ]}, { offsetDeg: 12 });
     assert(t.shipDef.name === '新船', '新船应生效');
     near(t.rocket.angle, 102, 1e-6, '发射台被占：新船应沿表面偏移 12°');
@@ -751,11 +751,11 @@ test('[多船] 新发射归档：换船不覆盖旧船，两船可切换', () =>
 
 test('[分级] 空格切断：下级沿船轴抛离、血量无损', () => {
     t.setShipDef({ version: 1, name: '分级船', parts: [
-        { id: 's1', type: 'capsule',   x: 0, y: 0 },
-        { id: 's2', type: 'tank',      x: 0, y: 2 },
-        { id: 's3', type: 'decoupler', x: 0, y: 5 },
-        { id: 's4', type: 'tank',      x: 0, y: 7 },
-        { id: 's5', type: 'engine',    x: 0, y: 10 },
+        { id: 's1', type: 'capsule', x: 0, y: 0 },
+        { id: 's2', type: 'tank', x: 0, y: 4 },
+        { id: 's3', type: 'decoupler', x: 0, y: 10 },
+        { id: 's4', type: 'tank', x: 0, y: 14 },
+        { id: 's5', type: 'engine', x: 0, y: 20 },
     ]});
     t.vessels.splice(1);
     t.resetInterp();
@@ -779,13 +779,13 @@ test('[分级] 空格切断：下级沿船轴抛离、血量无损', () => {
 
 test('[分级] 多级串联：两次空格 → 三截', () => {
     t.setShipDef({ version: 1, name: '三级船', parts: [
-        { id: 't1', type: 'capsule',   x: 0, y: 0 },
-        { id: 't2', type: 'tank',      x: 0, y: 2 },
-        { id: 'd1', type: 'decoupler', x: 0, y: 5 },
-        { id: 't3', type: 'tank',      x: 0, y: 7 },
-        { id: 'd2', type: 'decoupler', x: 0, y: 10 },
-        { id: 't4', type: 'tank',      x: 0, y: 12 },
-        { id: 't5', type: 'engine',    x: 0, y: 15 },
+        { id: 't1', type: 'capsule', x: 0, y: 0 },
+        { id: 't2', type: 'tank', x: 0, y: 4 },
+        { id: 'd1', type: 'decoupler', x: 0, y: 10 },
+        { id: 't3', type: 'tank', x: 0, y: 14 },
+        { id: 'd2', type: 'decoupler', x: 0, y: 20 },
+        { id: 't4', type: 'tank', x: 0, y: 24 },
+        { id: 't5', type: 'engine', x: 0, y: 30 },
     ]});
     t.vessels.splice(1);
     t.resetInterp();
@@ -801,9 +801,9 @@ test('[分级] 多级串联：两次空格 → 三截', () => {
 
 test('[分级] 侧挂分离器：切不断船体 → 整根脱离', () => {
     t.setShipDef({ version: 1, name: '侧挂船', parts: [
-        { id: 'w1', type: 'capsule',   x: 0, y: 0 },
-        { id: 'w2', type: 'engine',    x: 0, y: 2 },
-        { id: 'w3', type: 'decoupler', x: 20, y: 0 },
+        { id: 'w1', type: 'capsule', x: 0, y: 0 },
+        { id: 'w2', type: 'engine', x: 0, y: 4 },
+        { id: 'w3', type: 'decoupler', x: 40, y: 0 },
     ]});
     t.vessels.splice(1);
     t.resetInterp();
@@ -986,11 +986,11 @@ test('[守卫] 渲染循环无帧错误（开伞/分级/切船后仍每帧完整
     // 表现为整帧冻结、啥都没法做（用户实测）。这类错误必须在这里现形。
     window.__lastGameError = undefined;   // 清掉前面用例可能残留的帧错误基线
     t.setShipDef({ version: 1, name: '守卫船', parts: [
-        { id: 'w0', type: 'capsule',   x: 0, y: 0 },
-        { id: 'w1', type: 'chute',     x: 0, y: 2 },
-        { id: 'w2', type: 'decoupler', x: 0, y: 4 },
-        { id: 'w3', type: 'tank',      x: 0, y: 6 },
-        { id: 'w4', type: 'engine',    x: 0, y: 8 },
+        { id: 'w0', type: 'capsule', x: 0, y: 0 },
+        { id: 'w1', type: 'chute', x: 0, y: 4 },
+        { id: 'w2', type: 'decoupler', x: 0, y: 8 },
+        { id: 'w3', type: 'tank', x: 0, y: 12 },
+        { id: 'w4', type: 'engine', x: 0, y: 18 },
     ]});
     t.vessels.splice(1);
     t.resetInterp();

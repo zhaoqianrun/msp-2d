@@ -2667,16 +2667,24 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
             const fill = Math.max(0, Math.min(1, dens / 0.35));   // 35% 密度以上全鼓
             const spinNow = 0.35 + fill * 0.65;
 
-            // 伞绳长度随船体尺寸走（整体约为旧版的 60%——旧版伞比船还大一圈）
-            const ropeLen = Math.max(SPEC.width, SPEC.height) * 0.6;
-            // 伞面半径
-            const radius = Math.max(SPEC.width, SPEC.height) * (0.55 + fill * 0.55);
+            // 伞绳长度和伞面半径都按「降落伞部件自身」的尺寸算，
+            // 不再用整艘飞船的最大尺寸 —— 否则飞船一长，伞就跟着变得巨大。
+            //   部件 4x4 格 x PART_PX 3.5 = 14px
+            //   radius 约 14~21px，直径 28~42px
+            const pt0 = PART_TYPES[part.type];
+            const partSpan = Math.max(pt0.w, pt0.h) * P;   // 部件自身的边长（像素）
+            // 伞面尺寸：张开后要和飞船"有个伞样"——
+            // 真实降落伞张开直径通常是船体的 2~4 倍，这里取大约 1.8~3.6 倍。
+            //   组件 4x4 格 x P3.5 = 14px
+            //   半径 12.6~25.2px -> 直径 25~50px（飞船宽 14 高 49）
+            const ropeLen = partSpan * 0.5;                // 伞绳约半个部件长
+            const radius = partSpan * (0.9 + fill * 0.9);  // 伞面半径：瘪 0.9 倍 / 鼓 1.8 倍
 
             // 伞心位置：从伞包部件出发，朝速度反方向升起（每把伞锚在自身部件上）
             const pt = PART_TYPES[part.type];
             const partCX = (part.x + pt.w / 2 - SPEC.centerX) * P;
             const partCY = (SPEC.box.maxY - (part.y + pt.h / 2)) * P;
-            const hang = ropeLen + radius * 0.25;
+            const hang = ropeLen + radius * 0.35;   // 绳子短了，悬挂距离自然跟着小
             const cx = partCX - ux * hang;
             const cy = partCY - uy * hang;
 
@@ -2685,7 +2693,7 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
 
             // ---- 伞绳：从伞包部件连到伞心 ----
             c.strokeStyle = 'rgba(220, 220, 220, 0.85)';
-            c.lineWidth = Math.max(0.6, 1.1);
+            c.lineWidth = Math.max(0.4, 0.6);
             c.beginPath();
             const anchors = [
                 [partCX - pt.w * P * 0.35, partCY],

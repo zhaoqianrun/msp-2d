@@ -198,36 +198,36 @@
 // ============================================================
 const PART_TYPES = {
     capsule: {
-        name: '控制舱', w: 2, h: 2, mass: 30, fuel: 0, thrust: 0,
+        name: '控制舱', w: 4, h: 4, mass: 30, fuel: 0, thrust: 0,
         body: '#d8e4f2', edge: '#8fa8c4', accent: '#4a90d9',
         info: '驾驶它。必须有',
     },
     tank: {
-        name: '燃料箱', w: 2, h: 3, mass: 20, fuel: 40, thrust: 0,
+        name: '燃料箱', w: 4, h: 6, mass: 20, fuel: 40, thrust: 0,
         body: '#e8eef6', edge: '#9db2c9', accent: '#ff8800',
         info: '装燃料 +40',
     },
     engine: {
         // 推力必须和 play-main.html 一致（那里是 1000）。
-        name: '发动机', w: 2, h: 2, mass: 25, fuel: 0, thrust: 1000,
+        name: '发动机', w: 4, h: 4, mass: 25, fuel: 0, thrust: 1000,
         body: '#8d99a8', edge: '#5c6874', accent: '#ff5544',
         info: '推力 1000',
     },
     chute: {
         // 降落伞：减速发生在游戏内（按大气密度实时算），这里只负责放置。
-        name: '降落伞', w: 2, h: 2, mass: 8, fuel: 0, thrust: 0,
+        name: '降落伞', w: 4, h: 4, mass: 8, fuel: 0, thrust: 0,
         body: '#ff9a3c', edge: '#c46a1a', accent: '#ffe0a0',
         info: '减速伞：游戏中按 P 展开 / 切断',
     },
     decoupler: {
         // 分离器：游戏中按空格切断，下级沿船轴抛离（分级火箭）。
-        name: '分离器', w: 2, h: 2, mass: 4, fuel: 0, thrust: 0,
+        name: '分离器', w: 4, h: 4, mass: 4, fuel: 0, thrust: 0,
         body: '#5a6570', edge: '#3a424a', accent: '#ffd23c',
         info: '分级分离：游戏中按 空格 切断',
     },
 };
 
-const GRID = 20;              // 一格多少像素
+const GRID = 10;              // 一格多少像素（缩小到一半，部件格子数加倍，实际大小不变）
 const MAX_PARTS = 60;
 const SHIP_KEY = 'msp2d-ship';
 
@@ -558,20 +558,12 @@ function drawPart(p, isSelected) {
 
     } else if (p.type === 'chute') {
         // 包好的降落伞：格内 55% 的暗橙伞包（自动吸附：贴向相邻结构）
-        const pw = r.w * 0.55, ph = r.h * 0.55;
-        const band = (x0, x1, y0, y1) => ship.parts.some(q => {
-            if (q.id === p.id) return false;
-            const qt = PART_TYPES[q.type];
-            return x0 < q.x + qt.w && x1 > q.x && y0 < q.y + qt.h && y1 > q.y;
-        });
-        // 网格 y 轴向上：p.y-1..p.y 是网格下方（屏幕下方）
-        const aBelow = band(p.x - 1, p.x + t.w + 1, p.y - 1, p.y);
-        const aAbove = band(p.x - 1, p.x + t.w + 1, p.y + t.h, p.y + t.h + 1);
-        const aLeft = band(p.x - 1, p.x, p.y - 1, p.y + t.h + 1);
-        const aRight = band(p.x + t.w, p.x + t.w + 1, p.y - 1, p.y + t.h + 1);
-        const sx = (r.w - pw) / 2, sy = (r.h - ph) / 2;
-        const px = r.x + sx + (aRight ? sx : 0) - (aLeft ? sx : 0);
-        const py = r.y + sy + (aBelow ? sy : 0) - (aAbove ? sy : 0);
+        // 包好的降落伞：小的方形伞包，水平居中、垂直贴住格子底边。
+        // 贴底是故意的 —— 伞总是装在顶段，下面是指令舱/燃料箱，
+        // 居中会两边各空出一截，看起来和下面的积木「连不上」。
+        const pw = r.w * 0.43, ph = r.h * 0.43;
+        const px = r.x + (r.w - pw) / 2;
+        const py = r.y + r.h - ph;   // 贴住格子底边
         const grad = ctx.createLinearGradient(px, 0, px + pw, 0);
         grad.addColorStop(0, '#7a4a16'); grad.addColorStop(0.4, '#b5762a'); grad.addColorStop(1, '#8a5a20');
         roundRect(ctx, px, py, pw, ph, 5);
@@ -626,12 +618,19 @@ function drawPart(p, isSelected) {
         ctx.fillStyle = '#2b323a'; ctx.fill();
     }
 
-    // 选中高亮
+    // 选中高亮：框要贴合「实际画出来的贴图」，不是贴合格子。
+    // 降落伞只画了格子的 43%，所以它的框也要缩到 43%，
+    // 不然会出现「框很大、贴图很小」的错位感。
     if (isSelected) {
-        ctx.strokeStyle = '#ffc35c'; ctx.lineWidth = 2.5;
-        ctx.setLineDash([5, 4]);
-        ctx.strokeRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6);
-        ctx.setLineDash([]);
+        const VIS = { chute: 0.43, capsule: 0.98, tank: 0.98, engine: 0.98, decoupler: 0.98 };
+        const k = VIS[p.type] !== undefined ? VIS[p.type] : 0.98;
+        const bw = r.w * k, bh = r.h * k;
+        const bx = r.x + (r.w - bw) / 2;
+        // 降落伞的框要跟着伞包一起贴底，其它部件本来就在格子底部
+        const by = (p.type === 'chute') ? (r.y + r.h - bh) : (r.y + (r.h - bh) / 2);
+        ctx.strokeStyle = 'rgba(255, 195, 92, 0.85)';
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
     }
     ctx.restore();
 }
