@@ -4,27 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>MSP2D - 造船厂</title>
+<link rel="stylesheet" href="ui/shared.css">
 <style>
-    /* ==================== 设计 tokens（与 play-main.html 同一套） ==================== */
-    :root {
-        --panel: rgba(10, 16, 28, .82);
-        --panel-solid: rgba(8, 13, 24, .95);
-        --line: #2a3f5f;
-        --line-soft: rgba(42, 63, 95, .55);
-        --blue: #4a90d9;
-        --amber: #ffc35c;
-        --red: #ff6a6a;
-        --green: #45c46e;
-        --text: #dce8f7;
-        --dim: #6b86a6;
-        --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
-        --sans: 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-        --shadow: 0 2px 16px rgba(0, 0, 0, .35);
-    }
+    /* 设计 tokens 在 ui/shared.css（唯一事实源），本页只留布局与组件皮肤 */
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body {
-        margin: 0; background: #05070d; color: var(--text); overflow: hidden;
+        margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
         font-family: var(--sans);
         -webkit-tap-highlight-color: transparent;
     }
@@ -33,24 +19,25 @@
     #topbar {
         position: absolute; top: 0; left: 0; right: 0; height: 52px; z-index: 5;
         display: flex; align-items: center; gap: 10px; padding: 0 14px;
-        background: var(--panel-solid); border-bottom: 1px solid var(--line);
+        background: var(--surf-2); border-bottom: 1px solid var(--line);
     }
-    #topbar .title { color: var(--blue); letter-spacing: 4px; font-size: 14px; font-weight: 600; margin-right: 8px; }
+    #topbar .title { color: var(--blue); letter-spacing: .3em; font-size: 14px; font-weight: 600; margin-right: 8px; }
     .tbtn {
         padding: 8px 14px; font-size: 13px; font-family: inherit; cursor: pointer;
-        background: rgba(16, 26, 44, .9); color: var(--text);
-        border: 1px solid var(--line); border-radius: 8px;
+        background: var(--surf-1); color: var(--text);
+        border: 1px solid var(--line); border-radius: 3px;
         touch-action: manipulation;
     }
     .tbtn:hover { background: rgba(74, 144, 217, .14); border-color: var(--blue); }
-    .tbtn.on { background: rgba(74, 144, 217, .85); border-color: var(--blue); color: #fff; }
+    /* 激活态用琥珀（唯一强调色=当前态），不再整块蓝填充 */
+    .tbtn.on { background: rgba(255, 195, 92, .14); border-color: var(--amber); color: var(--amber); }
     .tbtn.go { background: rgba(69, 196, 110, .14); border-color: rgba(69, 196, 110, .55); color: #9fe0b0; }
     .tbtn.go:hover { background: rgba(69, 196, 110, .26); border-color: var(--green); }
     .tbtn.danger { border-color: rgba(255, 106, 106, .5); color: var(--red); }
     .tbtn.danger:hover { background: rgba(255, 106, 106, .12); border-color: var(--red); }
     #topbar .spacer { flex: 1; }
     #shipname {
-        background: rgba(74, 144, 217, .08); border: 1px solid var(--line); border-radius: 8px;
+        background: rgba(74, 144, 217, .08); border: 1px solid var(--line); border-radius: 3px;
         color: var(--text); font-family: inherit; font-size: 13px; padding: 7px 10px; width: 160px;
     }
     #shipname:focus { outline: none; border-color: var(--blue); }
@@ -58,18 +45,28 @@
     /* ===== 左侧部件库 ===== */
     #parts {
         position: absolute; top: 52px; left: 0; bottom: 0; width: 176px; z-index: 4;
-        background: rgba(10, 16, 28, .93); border-right: 1px solid var(--line);
+        background: var(--surf-2); border-right: 1px solid var(--line);
         padding: 12px 10px; overflow-y: auto; overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
     }
-    #parts h3 { color: var(--dim); font-size: 11px; font-weight: normal; letter-spacing: 3px; margin: 0 0 10px; }
+    /* 面板表头：2px 琥珀 tick + 字距标签 + 发丝线（与 .msp-hd 同语言） */
+    #parts h3 {
+        color: var(--dim); font-size: 11px; font-weight: normal; letter-spacing: .12em;
+        margin: 0 0 10px; padding-bottom: 8px;
+        border-bottom: 1px solid var(--line-dim);
+        display: flex; align-items: center; gap: 8px;
+    }
+    #parts h3::before { content: ''; width: 2px; height: 10px; background: var(--amber); }
     .part-card {
         display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
-        padding: 9px 10px; cursor: pointer; border-radius: 8px;
-        background: rgba(16, 26, 44, .7); border: 1px solid rgba(42, 63, 95, .7); touch-action: manipulation;
+        padding: 9px 10px; cursor: pointer; border-radius: 3px;
+        background: var(--surf-1); border: 1px solid var(--line-dim); touch-action: manipulation;
     }
-    .part-card:hover { background: rgba(74, 144, 217, .12); border-color: var(--blue); }
-    .part-card .swatch { width: 26px; height: 26px; border-radius: 5px; flex: none; }
+    .part-card:hover {
+        background: rgba(74, 144, 217, .1); border-color: var(--blue);
+        box-shadow: inset 2px 0 0 var(--amber);   /* 左缘琥珀滑条 */
+    }
+    .part-card .swatch { width: 26px; height: 26px; border-radius: 2px; flex: none; }
     .part-card .meta { line-height: 1.35; }
     .part-card .pname { font-size: 13px; }
     .part-card .pinfo { font-size: 11px; color: var(--dim); }
@@ -89,32 +86,47 @@
     #actions .tbtn { flex: 1; text-align: center; }
     #stats {
         background: var(--panel-solid); border: 1px solid var(--line);
-        border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.9;
+        border-radius: 3px; padding: 12px 16px; font-size: 13px; line-height: 1.9;
         min-width: 210px; box-shadow: var(--shadow);
+        background-image: var(--scan);
+    }
+    /* CSS 表头：#stats 内容由 JS 整块 innerHTML 生成，伪元素不怕被覆盖 */
+    #stats::before {
+        content: '飞船统计';
+        display: flex; align-items: center; gap: 8px;
+        color: var(--dim); font-size: 11px; letter-spacing: .12em; line-height: 10px;
+        padding-bottom: 8px; margin-bottom: 6px;
+        border-bottom: 1px solid var(--line-dim);
     }
     #stats .k { color: var(--dim); display: inline-block; width: 84px; }
-    #stats .v { color: var(--text); font-family: var(--mono); font-size: 12.5px; }
+    #stats .v { color: var(--text); font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
     #stats .warn { color: var(--red); }
-    #stats .ok { color: #7fe0a8; }
+    #stats .ok { color: var(--green); }
     #staging {
-        background: rgba(10, 18, 32, 0.94); border: 1px solid #24395a;
-        border-radius: 10px; padding: 10px 14px; font-size: 12px;
+        background: var(--panel-solid); border: 1px solid var(--line);
+        border-radius: 3px; padding: 10px 14px; font-size: 12px;
+        box-shadow: var(--shadow);
     }
-    #staging h3 { color: #6b86a6; font-size: 11px; font-weight: normal; letter-spacing: 2px; margin: 0 0 6px; }
+    #staging h3 {
+        color: var(--dim); font-size: 11px; font-weight: normal; letter-spacing: .12em;
+        margin: 0 0 6px;
+        display: flex; align-items: center; gap: 8px;
+    }
+    #staging h3::before { content: ''; width: 2px; height: 10px; background: var(--amber); }
     #staging .stg-row {
         display: flex; align-items: center; gap: 6px;
-        padding: 3px 0; border-bottom: 1px solid #16233a;
+        padding: 3px 0; border-bottom: 1px solid var(--line-dim);
     }
     #staging .stg-row:last-child { border-bottom: none; }
-    #staging .stg-n { color: #ffc35c; font-family: monospace; min-width: 34px; }
-    #staging .stg-item { color: #cfe2f7; display: inline-flex; align-items: center; gap: 4px; }
+    #staging .stg-n { color: var(--amber); font-family: var(--mono); min-width: 34px; }
+    #staging .stg-item { color: var(--text); display: inline-flex; align-items: center; gap: 4px; }
     #staging .stg-btn {
-        background: #16233a; color: #8fb4dc; border: 1px solid #35506e;
-        border-radius: 4px; cursor: pointer; font-size: 10px; padding: 1px 5px;
+        background: rgba(74, 144, 217, .1); color: var(--dim); border: 1px solid var(--line-strong);
+        border-radius: 2px; cursor: pointer; font-size: 10px; padding: 1px 5px;
         font-family: inherit;
     }
-    #staging .stg-btn:hover { background: #2a6db5; color: #fff; }
-    #staging .stg-empty { color: #5a6b80; }
+    #staging .stg-btn:hover { background: rgba(74, 144, 217, .3); color: #fff; }
+    #staging .stg-empty { color: var(--dim); opacity: .8; }
 
     /* ===== 底部提示 ===== */
     #hint {
@@ -167,8 +179,8 @@
         <button class="tbtn" id="btn-undo">撤销</button>
         <button class="tbtn danger" id="btn-del">删除选中</button>
     </div>
-    <div id="stats"></div>
-    <div id="staging">
+    <div id="stats" class="msp-corners"></div>
+    <div id="staging" class="msp-corners">
         <h3>分 级</h3>
         <div id="stage-list"></div>
     </div>
@@ -926,8 +938,8 @@ function toast(msg) {
         el = document.createElement('div');
         el.id = 'toast';
         el.style.cssText = 'position:absolute;top:66px;left:50%;transform:translateX(-50%);z-index:9;'
-            + 'background:rgba(10,20,40,.95);border:1px solid #4a90d9;border-radius:8px;'
-            + 'padding:9px 20px;color:#cfe2f7;font-size:13px;pointer-events:none;opacity:0;transition:opacity .25s';
+            + 'background:var(--surf-3);border:1px solid var(--line-strong);border-radius:3px;'
+            + 'padding:9px 20px;color:var(--text);font-size:13px;pointer-events:none;opacity:0;transition:opacity .25s';
         document.body.appendChild(el);
     }
     el.innerText = msg;
