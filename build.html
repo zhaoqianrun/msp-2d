@@ -522,9 +522,20 @@ function drawPart(p, isSelected) {
         ctx.fillRect(r.x + 2, r.y + r.h * 0.60, r.w - 4, bandH);
 
     } else if (p.type === 'chute') {
-        // 包好的降落伞：格内 55% 居中的暗橙伞包（与游戏内同款、同去饱和）
+        // 包好的降落伞：格内 55% 的暗橙伞包（自动吸附：贴向相邻结构）
         const pw = r.w * 0.55, ph = r.h * 0.55;
-        const px = r.x + (r.w - pw) / 2, py = r.y + (r.h - ph) / 2;
+        const band = (x0, x1, y0, y1) => ship.parts.some(q => {
+            if (q.id === p.id) return false;
+            const qt = PART_TYPES[q.type];
+            return x0 < q.x + qt.w && x1 > q.x && y0 < q.y + qt.h && y1 > q.y;
+        });
+        const aUp = band(p.x - 1, p.x + t.w + 1, p.y - 1, p.y);
+        const aDown = band(p.x - 1, p.x + t.w + 1, p.y + t.h, p.y + t.h + 1);
+        const aLeft = band(p.x - 1, p.x, p.y - 1, p.y + t.h + 1);
+        const aRight = band(p.x + t.w, p.x + t.w + 1, p.y - 1, p.y + t.h + 1);
+        const sx = (r.w - pw) / 2, sy = (r.h - ph) / 2;
+        const px = r.x + sx + (aRight ? sx : 0) - (aLeft ? sx : 0);
+        const py = r.y + sy + (aDown ? sy : 0) - (aUp ? sy : 0);
         const grad = ctx.createLinearGradient(px, 0, px + pw, 0);
         grad.addColorStop(0, '#7a4a16'); grad.addColorStop(0.4, '#b5762a'); grad.addColorStop(1, '#8a5a20');
         roundRect(ctx, px, py, pw, ph, 5);

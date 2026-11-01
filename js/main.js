@@ -2438,7 +2438,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 const y = bottomLocal - (p.y + t.h) * P;
                 const w = t.w * P;
                 const h = t.h * P;
-                drawShipPart(c, p.type, t, x, y, w, h);
+                drawShipPart(c, p.type, t, x, y, w, h, chuteAnchor(shipDef, p));
             }
 
             // 点火时在发动机喷口画火焰
@@ -2629,7 +2629,26 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         }
 
         // 和造船厂里是同一套画法，只是尺寸参数不同
-        function drawShipPart(c, type, t, x, y, w, h) {
+        // 伞包自动吸附：探测四边/四角的相邻部件，返回吸附方向。
+        // 伞包画得小（格内 55%），若总是居中会在自己的格子里悬空——
+        // 贴向有结构的那一侧/那个角，视觉上才算装在船上。
+        function chuteAnchor(def, part) {
+            const t = PART_TYPES[part.type];
+            const band = (x0, x1, y0, y1) => def.parts.some(q => {
+                if (q.id === part.id) return false;
+                const qt = PART_TYPES[q.type];
+                return x0 < q.x + qt.w && x1 > q.x && y0 < q.y + qt.h && y1 > q.y;
+            });
+            const W = part.x, E = part.x + t.w, S = part.y, N = part.y + t.h;
+            return {
+                up:    band(W - 1, E + 1, S - 1, S),
+                down:  band(W - 1, E + 1, N, N + 1),
+                left:  band(W - 1, W, S - 1, N + 1),
+                right: band(E, E + 1, S - 1, N + 1),
+            };
+        }
+
+        function drawShipPart(c, type, t, x, y, w, h, anchor) {
             if (type === 'capsule') {
                 drawCapsule(c, x, y, w, h);
 
@@ -2668,10 +2687,13 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 c.fillStyle = '#2b323a'; c.fill();
 
             } else if (type === 'chute') {
-                // 包好的降落伞：格内 55% 居中的暗橙伞包 + 捆扎带
-                // （去饱和：以前撑满整格的亮橙在深底上像在发光）
+                // 包好的降落伞：格内 55% 的暗橙伞包 + 捆扎带
+                // （自动吸附：贴向相邻结构那一侧/那个角，不悬空）
                 const pw = w * 0.55, ph = h * 0.55;
-                const px = x + (w - pw) / 2, py = y + (h - ph) / 2;
+                const sx = (w - pw) / 2, sy = (h - ph) / 2;
+                const anc = anchor || {};
+                const px = x + sx + (anc.right ? sx : 0) - (anc.left ? sx : 0);
+                const py = y + sy + (anc.down ? sy : 0) - (anc.up ? sy : 0);
                 const grad = c.createLinearGradient(px, 0, px + pw, 0);
                 grad.addColorStop(0, '#7a4a16'); grad.addColorStop(0.4, '#b5762a'); grad.addColorStop(1, '#8a5a20');
                 shipRoundRect(c, px, py, pw, ph, pw * 0.28);
@@ -2860,7 +2882,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     const P = PART_PX;
                     const x = p.x * P - v.spec.centerX * P;
                     const y = v.spec.box.maxY * P - (p.y + t.h) * P;
-                    drawShipPart(ctx, p.type, t, x, y, t.w * P, t.h * P);
+                    drawShipPart(ctx, p.type, t, x, y, t.w * P, t.h * P, chuteAnchor(v.def, p));
                 }
                 ctx.globalAlpha = 1;
                 ctx.restore();
