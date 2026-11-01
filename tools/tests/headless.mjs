@@ -56,6 +56,11 @@ export function installBrowserStubs() {
             if (!elements.has(id)) elements.set(id, makeElement(id));
             return elements.get(id);
         },
+        // main.js 用 createElement 造 offscreen canvas（星空预渲染等），
+        // 桩返回普通元素即可：getContext 是 noop 代理，宽高可随意赋值
+        createElement(tag) {
+            return makeElement('created-' + tag);
+        },
         addEventListener: noop,
         removeEventListener: noop,
         hidden: false,

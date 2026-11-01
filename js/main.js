@@ -13,6 +13,7 @@ import { fmtDistance, fmtSpeed } from './core/format.js';
 import { planet, GRAVITY_MU, gravityAt, atmosphereDensity, atmoThickness } from './world/planet.js';
 import { predictPath, predictPathOrigin } from './physics/prediction.js';
 import { camera } from './render/camera.js';
+import { skyTint, starVisibility, makeStarLayer, STAR_COLORS } from './render/sky.js';
 import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
          resetToasts, toastQueue, achieved, achievements } from './ui/achievements.js';
 import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu.js';
@@ -26,6 +27,57 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
         // 渲染分辨率跟着窗口走（考虑高 DPI），物理坐标不变。
         // 逻辑画布尺寸（绘制时统一用这两个，替代以前写死的 1000 / 700）
         let canvasW = 1000, canvasH = 700;
+
+        // ==================== 星空（offscreen 预渲染 + 轻视差） ====================
+        // 远层钉死屏幕（真·无穷远，零视差）；近层按「相机屏幕位移」积分 6%
+        // 视差——对平移有正确的远近层次，对缩放完全无感（不会出现缩放时
+        // 星星狂流）。每帧只有 2~5 次 drawImage，成本忽略不计。
+        // 注意：必须在 fitCanvas() 首次调用之前完成 let/const 初始化（TDZ）。
+        const STAR_PARALLAX = 0.06;
+        const STAR_NEAR_MARGIN = 128;
+        let starFarCv = null, starNearCv = null;
+        let starOx = 0, starOy = 0;                  // 近层视差累积位移
+        let starCamX = null, starCamY = null;        // 上一帧相机位置（求屏幕位移用）
+
+        function paintStars(c, stars) {
+            for (const s of stars) {
+                const [r, g, b] = STAR_COLORS[s.c];
+                c.globalAlpha = s.a;
+                c.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+                c.beginPath();
+                c.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+                c.fill();
+                if (s.cross) {                       // 十字亮星：横竖两道细光芒
+                    c.globalAlpha = s.a * 0.5;
+                    c.strokeStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+                    c.lineWidth = 1;
+                    c.beginPath();
+                    c.moveTo(s.x - s.crossR, s.y); c.lineTo(s.x + s.crossR, s.y);
+                    c.moveTo(s.x, s.y - s.crossR); c.lineTo(s.x, s.y + s.crossR);
+                    c.stroke();
+                }
+            }
+            c.globalAlpha = 1;
+        }
+
+        function buildStarfield() {
+            if (!document.createElement) return;     // 兜底：极端桩环境没有 createElement
+            // 远层：贴满画布，细小暗淡
+            starFarCv = document.createElement('canvas');
+            starFarCv.width = Math.max(1, canvasW);
+            starFarCv.height = Math.max(1, canvasH);
+            paintStars(starFarCv.getContext('2d'),
+                makeStarLayer(20261031, starFarCv.width, starFarCv.height, 240,
+                    { rMin: 0.4, rMax: 1.1, aMin: 0.25, aMax: 0.7 }));
+            // 近层：四周各留 128px 余量做成可平铺瓦片，稍大稍亮 + 十字亮星
+            starNearCv = document.createElement('canvas');
+            starNearCv.width = Math.max(1, canvasW + STAR_NEAR_MARGIN * 2);
+            starNearCv.height = Math.max(1, canvasH + STAR_NEAR_MARGIN * 2);
+            paintStars(starNearCv.getContext('2d'),
+                makeStarLayer(975310, starNearCv.width, starNearCv.height, 84,
+                    { rMin: 0.8, rMax: 1.8, aMin: 0.5, aMax: 0.95, crosses: 7 }));
+        }
+
         function fitCanvas() {
             const dpr = Math.min(window.devicePixelRatio || 1, 2);
             const w = Math.max(320, window.innerWidth);
@@ -36,6 +88,7 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
             canvas.style.height = h + 'px';
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);  // 之后所有绘制都用逻辑坐标
             canvasW = w; canvasH = h;
+            buildStarfield();                        // 星空 offscreen 跟着画布尺寸重建
         }
         fitCanvas();
         window.addEventListener('resize', () => { fitCanvas(); });
@@ -2916,8 +2969,36 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
             camera.x = rr.x;
             camera.y = rr.y;
 
-            ctx.fillStyle = '#050510';
+            // ---- 天空色 + 星空（背景层，画在世界之前）----
+            // 船所在处的大气密度决定背景：地表蓝天无星 → 高空渐暗 → 太空满星
+            const shipDens = atmosphereDensity(rocket.x, rocket.y);
+            const tint = skyTint(shipDens);
+            ctx.fillStyle = 'rgb(' + tint.r + ',' + tint.g + ',' + tint.b + ')';
             ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const starVis = starVisibility(shipDens);
+            if (starVis > 0.01 && starFarCv) {
+                // 近层视差：相机屏幕位移积分（每帧钳 ±48px，传送/硬夹不瞬移）
+                if (starCamX === null) { starCamX = camera.x; starCamY = camera.y; }
+                else {
+                    const sdx = Math.max(-48, Math.min(48, (camera.x - starCamX) * camera.zoom));
+                    const sdy = Math.max(-48, Math.min(48, (camera.y - starCamY) * camera.zoom));
+                    starOx += sdx * STAR_PARALLAX;
+                    starOy += sdy * STAR_PARALLAX;
+                    starCamX = camera.x; starCamY = camera.y;
+                }
+                ctx.globalAlpha = starVis;
+                ctx.drawImage(starFarCv, 0, 0);
+                if (starNearCv) {
+                    const tw = starNearCv.width, th = starNearCv.height;
+                    let ox = (-starOx) % tw; if (ox > 0) ox -= tw;   // 归一到 (-tw, 0]
+                    let oy = (-starOy) % th; if (oy > 0) oy -= th;
+                    for (let bx = ox; bx < canvasW; bx += tw)
+                        for (let by = oy; by < canvasH; by += th)
+                            ctx.drawImage(starNearCv, bx, by);
+                }
+                ctx.globalAlpha = 1;
+            }
 
             // ---- 世界层 1：星球本体 + 大气（只做 fill）----
             // 描边全部移到屏幕空间：world 空间里「px/zoom」的线宽在缩小视野时会

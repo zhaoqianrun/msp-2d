@@ -901,6 +901,70 @@ test('菜单开着泵帧无帧错误（帧守卫）', () => {
 
 // ============================================================
 
+console.log('\n== 天空与星空 ==');
+const sky = await import('../../js/render/sky.js');
+
+test('skyTint：太空纯黑 / 地表全蓝 / 单调过渡 / 越界钳制', () => {
+    const t0 = sky.skyTint(0);
+    assert(t0.r === sky.SPACE_RGB.r && t0.g === sky.SPACE_RGB.g && t0.b === sky.SPACE_RGB.b,
+        'dens=0 应为太空底色: ' + JSON.stringify(t0));
+    const t1 = sky.skyTint(1);
+    assert(t1.r === sky.SURFACE_SKY_RGB.r && t1.g === sky.SURFACE_SKY_RGB.g && t1.b === sky.SURFACE_SKY_RGB.b,
+        'dens=1 应为地表天空色: ' + JSON.stringify(t1));
+    const tOver = sky.skyTint(5);
+    assert(tOver.r === t1.r && tOver.g === t1.g && tOver.b === t1.b, 'dens>1 应钳到地表色');
+    let last = -1;
+    for (let d = 0; d <= 1.001; d += 0.1) {
+        const c = sky.skyTint(d).r;
+        assert(c >= last, '天空色应随密度单调变亮: ' + d + ' → ' + c);
+        last = c;
+    }
+});
+
+test('starVisibility：地表 0 / 太空 1 / 单调', () => {
+    assert(sky.starVisibility(1) === 0, '地表不应看见星星');
+    assert(sky.starVisibility(0) === 1, '太空应满星');
+    assert(sky.starVisibility(5) === 0, '越界应钳为 0');
+    let last = 2;
+    for (let d = 0; d <= 1.001; d += 0.1) {
+        const v = sky.starVisibility(d);
+        assert(v <= last, '星星可见度应随密度单调下降: ' + d + ' → ' + v);
+        last = v;
+    }
+});
+
+test('星表 seeded 确定性：同 seed 逐字节一致，crosses 在末尾', () => {
+    const a = sky.makeStarLayer(42, 800, 600, 50, { crosses: 5 });
+    const b = sky.makeStarLayer(42, 800, 600, 50, { crosses: 5 });
+    assert(JSON.stringify(a) === JSON.stringify(b), '同 seed 星表应完全一致');
+    const c = sky.makeStarLayer(43, 800, 600, 50, { crosses: 5 });
+    assert(JSON.stringify(a) !== JSON.stringify(c), '不同 seed 星表应不同');
+    for (const s of a) {
+        assert(s.x >= 0 && s.x < 800 && s.y >= 0 && s.y < 600, '星星应在画布范围内');
+        assert(s.c >= 0 && s.c < sky.STAR_COLORS.length, '色档应合法');
+    }
+    assert(a.slice(45).every(s => s.cross) && a.slice(0, 45).every(s => !s.cross),
+        'crosses 应是末尾 N 颗');
+});
+
+test('高空满星渲染泵帧无帧错误（星空/视差/天空色全链路）', () => {
+    resetToGround();
+    // 把船放到大气外（密度 0）：走「太空黑 + 满星 + 近层平铺」渲染分支
+    t.rocket.x = planet.x;
+    t.rocket.y = planet.y - (planet.radius + 500000);
+    t.rocket.vx = 0; t.rocket.vy = 0;
+    t.rocket.landed = false;
+    t.rocket.state = 'idle';
+    t.resetInterp();
+    window.__lastGameError = undefined;     // 粘滞基线先清
+    env.pumpFrames(60);
+    assert(window.__lastGameError === undefined || window.__lastGameError === null,
+           '星空渲染循环不应抛错: ' + (window.__lastGameError && window.__lastGameError.message));
+    resetToGround();
+});
+
+// ============================================================
+
 console.log('\n==========================================');
 test('[守卫] 渲染循环无帧错误（开伞/分级/切船后仍每帧完整执行）', () => {
     // 回归：drawChute 曾因引用未定义的 P 让每帧抛错被防护网吞掉——
