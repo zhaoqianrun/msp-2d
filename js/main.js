@@ -2584,6 +2584,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // 伞面永远朝「速度的反方向」张开（迎风面）——船往哪掉，伞就撑在哪边。
         // 展开程度随大气密度变化：密度低时伞瘪瘪的，越往下鼓得越圆。
         function drawChute(c, vx, vy, dens, heat, part) {
+            const P = PART_PX;
             if (chuteStateOf(part.id) !== 'open') return;
             const sp = Math.hypot(vx, vy);
             if (sp < 0.5) return;   // 几乎静止时不画（避免抖动）
@@ -3182,7 +3183,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 orbitLine + '\n' +
                 `圆轨道: ${fmtSpeed(vCirc)}　逃逸: ${fmtSpeed(vEsc)}${orbitHint}\n` +
                 `${atmoStatusText()}${heatLine()}\n` +
-                `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m　质量: ${shipMass(rocket.fuel).toFixed(0)}　${chuteHudLine()}\n` +
+                `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m　质量: ${shipMass().toFixed(0)}　${chuteHudLine()}\n` +
                 `成就: ${achieved.size} / ${achievements.length}（按 C 查看）　音乐: ${bgmMuted ? '关' : '开'}\n` +
                 coopLine();
 
