@@ -522,21 +522,23 @@ function drawPart(p, isSelected) {
         ctx.fillRect(r.x + 2, r.y + r.h * 0.60, r.w - 4, bandH);
 
     } else if (p.type === 'chute') {
-        // 包好的降落伞：橙色伞包 + 捆扎带（游戏内按 P 展开后的伞面另画）
-        const grad = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
-        grad.addColorStop(0, '#e07018'); grad.addColorStop(0.4, t.body); grad.addColorStop(1, '#c46a1a');
-        roundRect(ctx, r.x, r.y, r.w, r.h, 5);
+        // 包好的降落伞：格内 55% 居中的暗橙伞包（与游戏内同款、同去饱和）
+        const pw = r.w * 0.55, ph = r.h * 0.55;
+        const px = r.x + (r.w - pw) / 2, py = r.y + (r.h - ph) / 2;
+        const grad = ctx.createLinearGradient(px, 0, px + pw, 0);
+        grad.addColorStop(0, '#7a4a16'); grad.addColorStop(0.4, '#b5762a'); grad.addColorStop(1, '#8a5a20');
+        roundRect(ctx, px, py, pw, ph, 5);
         ctx.fillStyle = grad; ctx.fill();
-        ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5; ctx.stroke();
-        // 十字捆扎带
-        ctx.strokeStyle = t.accent; ctx.lineWidth = Math.max(1.5, r.w * 0.09);
+        ctx.strokeStyle = '#5a3a10'; ctx.lineWidth = 1.5; ctx.stroke();
+        // 十字捆扎带（暗卡其）
+        ctx.strokeStyle = '#c9b48a'; ctx.lineWidth = Math.max(1.5, pw * 0.09);
         ctx.beginPath();
-        ctx.moveTo(r.x + r.w / 2, r.y + 1); ctx.lineTo(r.x + r.w / 2, r.y + r.h - 1);
-        ctx.moveTo(r.x + 1, r.y + r.h * 0.45); ctx.lineTo(r.x + r.w - 1, r.y + r.h * 0.45);
+        ctx.moveTo(px + pw / 2, py + 1); ctx.lineTo(px + pw / 2, py + ph - 1);
+        ctx.moveTo(px + 1, py + ph * 0.45); ctx.lineTo(px + pw - 1, py + ph * 0.45);
         ctx.stroke();
         // 顶部开伞扣
-        ctx.fillStyle = t.accent;
-        ctx.fillRect(r.x + r.w * 0.35, r.y - 1, r.w * 0.3, Math.max(2, r.h * 0.08));
+        ctx.fillStyle = '#c9b48a';
+        ctx.fillRect(px + pw * 0.35, py - 1, pw * 0.3, Math.max(2, ph * 0.08));
 
     } else if (p.type === 'decoupler') {
         // 分离器：深灰扁环 + 黄色警示条纹

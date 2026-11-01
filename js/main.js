@@ -2195,9 +2195,17 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                         rocket.vy -= (rocket.vy / sp) * chuteDrag * dt;
                     }
                 }
-                // 再入加热：高速冲进稠密大气
-                if (sp > REENTRY_SPEED) {
-                    heating = Math.min(1, (sp - REENTRY_SPEED) / 400) * dens * 3;
+                // 再入加热辉光：与损毁系统（updateHeat）同一套触发条件——
+                // ①密度足够（>1%）②速度超再入阈值 ③确实在朝地面俯冲。
+                // 旧实现只看速度：上升段也发光、稀薄高空也发光——出现时机错误。
+                // 强度：速度 800→1200 线性爬升，按密度饱和放大（不再 ×3 一步到满）。
+                if (dens > 0.01 && sp > REENTRY_SPEED) {
+                    const rx = rocket.x - planet.x, ry = rocket.y - planet.y;
+                    const r = Math.hypot(rx, ry) || 1;
+                    const radialSpeed = (rocket.vx * rx + rocket.vy * ry) / r;
+                    if (radialSpeed < -20) {   // 真的在朝地面俯冲
+                        heating = Math.min(1, (sp - REENTRY_SPEED) / 400) * Math.min(1, dens * 4);
+                    }
                 }
             }
             rocket.heat = heating;
@@ -2459,7 +2467,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // ==================== 画降落伞 ====================
         // 伞面永远朝「速度的反方向」张开（迎风面）——船往哪掉，伞就撑在哪边。
         // 展开程度随大气密度变化：密度低时伞瘪瘪的，越往下鼓得越圆。
-        function drawChute(c, vx, vy, dens) {
+        function drawChute(c, vx, vy, dens, heat) {
             if (chuteState !== 'open') return;
             const sp = Math.hypot(vx, vy);
             if (sp < 0.5) return;   // 几乎静止时不画（避免抖动）
@@ -2468,19 +2476,20 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             const ux = vx / sp, uy = vy / sp;
 
             // 伞的“饱满程度”：密度越高越鼓，1.0 = 全开
-            const fill = Math.max(0, Math.min(1, dens / 0.25));   // 25% 密度以上全鼓
+            const fill = Math.max(0, Math.min(1, dens / 0.35));   // 35% 密度以上全鼓
             const spinNow = 0.35 + fill * 0.65;
 
-            // 伞绳长度随船体尺寸走
-            const ropeLen = Math.max(SPEC.width, SPEC.height) * 0.9;
+            // 伞绳长度随船体尺寸走（整体约为旧版的 60%——旧版伞比船还大一圈）
+            const ropeLen = Math.max(SPEC.width, SPEC.height) * 0.6;
             // 伞面半径
-            const radius = Math.max(SPEC.width, SPEC.height) * (0.9 + fill * 0.9);
+            const radius = Math.max(SPEC.width, SPEC.height) * (0.55 + fill * 0.55);
 
             // 伞心位置：在船体的「上方」（也就是速度反方向）
             const cx = -ux * (ropeLen + radius * 0.25);
             const cy = -uy * (ropeLen + radius * 0.25);
 
             c.save();
+            if (heat > 0.05) c.globalAlpha = Math.max(0.45, 1 - heat * 0.6);   // 热流中布面变暗
 
             // ---- 伞绳：从船体几个点连到伞心 ----
             c.strokeStyle = 'rgba(220, 220, 220, 0.85)';
@@ -2659,22 +2668,25 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 c.fillStyle = '#2b323a'; c.fill();
 
             } else if (type === 'chute') {
-                // 包好的降落伞：橙色伞包 + 捆扎带（展开后的伞面见 drawChute）
-                const grad = c.createLinearGradient(x, 0, x + w, 0);
-                grad.addColorStop(0, '#e07018'); grad.addColorStop(0.4, t.body); grad.addColorStop(1, '#c46a1a');
-                shipRoundRect(c, x, y, w, h, w * 0.28);
+                // 包好的降落伞：格内 55% 居中的暗橙伞包 + 捆扎带
+                // （去饱和：以前撑满整格的亮橙在深底上像在发光）
+                const pw = w * 0.55, ph = h * 0.55;
+                const px = x + (w - pw) / 2, py = y + (h - ph) / 2;
+                const grad = c.createLinearGradient(px, 0, px + pw, 0);
+                grad.addColorStop(0, '#7a4a16'); grad.addColorStop(0.4, '#b5762a'); grad.addColorStop(1, '#8a5a20');
+                shipRoundRect(c, px, py, pw, ph, pw * 0.28);
                 c.fillStyle = grad; c.fill();
-                c.strokeStyle = t.edge; c.lineWidth = 1; c.stroke();
-                // 十字捆扎带
-                c.strokeStyle = t.accent;
-                c.lineWidth = Math.max(1, w * 0.09);
+                c.strokeStyle = '#5a3a10'; c.lineWidth = 1; c.stroke();
+                // 十字捆扎带（暗卡其）
+                c.strokeStyle = '#c9b48a';
+                c.lineWidth = Math.max(1, pw * 0.09);
                 c.beginPath();
-                c.moveTo(x + w / 2, y + 1); c.lineTo(x + w / 2, y + h - 1);
-                c.moveTo(x + 1, y + h * 0.45); c.lineTo(x + w - 1, y + h * 0.45);
+                c.moveTo(px + pw / 2, py + 1); c.lineTo(px + pw / 2, py + ph - 1);
+                c.moveTo(px + 1, py + ph * 0.45); c.lineTo(px + pw - 1, py + ph * 0.45);
                 c.stroke();
                 // 顶部开伞扣
-                c.fillStyle = t.accent;
-                c.fillRect(x + w * 0.35, y - 1, w * 0.3, Math.max(2, h * 0.08));
+                c.fillStyle = '#c9b48a';
+                c.fillRect(px + pw * 0.35, py - 1, pw * 0.3, Math.max(2, ph * 0.08));
 
             } else if (type === 'decoupler') {
                 // 分离器：深灰扁环 + 黄色警示条纹（按空格切断）
@@ -2880,9 +2892,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             ctx.translate(-SPEC.com.x, -SPEC.com.y);
             drawShip(ctx, rocket.state === 'firing' && rocket.fuel > 0, performance.now());
 
-            // ---- 降落伞（画在飞船之上，伞面朝速度反方向）----
-            drawChute(ctx, rocket.vx, rocket.vy, atmosphereDensity(rocket.x, rocket.y));
-
             // ---- 再入加热：高速冲进大气时，船体外面裹一层火光 ----
             const heat = rocket.heat || 0;
             if (heat > 0.01) {
@@ -2897,6 +2906,9 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 ctx.fill();
                 ctx.globalAlpha = 1;
             }
+
+            // ---- 降落伞（画在辉光之后：伞是布，不跟船体一起被火光罩住）----
+            drawChute(ctx, rocket.vx, rocket.vy, atmosphereDensity(rocket.x, rocket.y), rocket.heat || 0);
             ctx.restore();
 
             ctx.restore();
