@@ -1,0 +1,75 @@
+/* ============================================================
+   MSP-2D 全局 UI tokens + 原语（唯一事实源）
+   四页统一 <link rel="stylesheet" href="ui/shared.css">；
+   各页 <style> 只留页面专属布局，不再自带 tokens 拷贝。
+
+   设计语言：任务控制台 / 机载仪表 OSD ——
+   实面石板底、3px 方角、四角括号、表头刻度、单一琥珀强调。
+   禁：紫 / 蓝紫渐变 / 彩色发光 / 满屏玻璃 blur（弹层才许 2px）。
+   ============================================================ */
+
+:root {
+    /* ---- 表面：三层实面。画布里的宇宙是唯一「彩色区」，面板全部压暗压实 ---- */
+    --bg: #05070d;
+    --surf-1: rgba(10, 14, 22, .92);   /* L1 读出面：HUD 面板 / 统计 / chips */
+    --surf-2: #0c1119;                 /* L2 结构面：顶栏 / 侧栏 */
+    --surf-3: #0b1018;                 /* L3 弹层：成就 / 暂停 / 帮助 */
+
+    /* ---- 线阶：三档，越亮越「重要」 ---- */
+    --line-strong: #3b5573;
+    --line: #2a3f5f;
+    --line-dim: rgba(42, 63, 95, .35);
+
+    /* ---- 语义色（纪律：蓝只做身份色/hover 描边；琥珀唯一强调；绿红只表状态） ---- */
+    --blue: #4a90d9;
+    --amber: #ffc35c;
+    --red: #ff6a6a;
+    --green: #45c46e;
+
+    /* ---- 文字 ---- */
+    --text: #dce8f7;
+    --dim: #6b86a6;
+    --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+    --sans: 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+    /* ---- 兼容别名：页面旧规则里的 var(--panel) 等先指到新表面，逐步清退 ---- */
+    --panel: var(--surf-1);
+    --panel-solid: var(--surf-3);
+    --line-soft: var(--line-dim);
+    --shadow: 0 2px 12px rgba(0, 0, 0, .4);
+
+    /* ---- 微纹理：3px 扫描线、2% 透明度——低于可注意阈值，只贡献材质 ---- */
+    --scan: repeating-linear-gradient(0deg, rgba(255, 255, 255, .02) 0 1px, transparent 1px 3px);
+}
+
+/* ---- 面板表头：2px 琥珀 tick + 字距标签 + 发丝分隔线 ---- */
+.msp-hd {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--dim); font-size: 11px; letter-spacing: .12em;
+    padding-bottom: 8px; margin-bottom: 8px;
+    border-bottom: 1px solid var(--line-dim);
+}
+.msp-hd::before {
+    content: ''; width: 2px; height: 10px; flex: none;
+    background: var(--amber);
+}
+
+/* ---- 四角括号（对角两枚）：宿主需 position 非 static ----
+   常态用结构色；弹层/强调态加 .msp-corners--amber 提到琥珀。 */
+.msp-corners { --corner: rgba(59, 85, 115, .55); position: relative; }
+.msp-corners::before, .msp-corners::after {
+    content: ''; position: absolute; width: 7px; height: 7px; pointer-events: none;
+}
+.msp-corners::before { top: -1px; left: -1px; border-top: 1px solid var(--corner); border-left: 1px solid var(--corner); }
+.msp-corners::after  { bottom: -1px; right: -1px; border-bottom: 1px solid var(--corner); border-right: 1px solid var(--corner); }
+.msp-corners--amber { --corner: var(--amber); }
+
+/* ---- 扫描线微纹理（走元素自身 background-image，不占伪元素） ---- */
+.msp-scan { background-image: var(--scan); }
+
+/* ---- 键位小帽：全站统一方角 ---- */
+.msp-kbd {
+    font-family: var(--mono); font-size: 11px; color: var(--text);
+    background: rgba(74, 144, 217, .12); border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 2px; padding: 1px 6px;
+}

@@ -4,25 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MSP2D - 主菜单</title>
+    <link rel="stylesheet" href="ui/shared.css">
     <style>
-        /* ==================== 设计 tokens（与 play-main.html 同一套） ==================== */
-        :root {
-            --panel: rgba(10, 16, 28, .82);
-            --line: #2a3f5f;
-            --line-soft: rgba(42, 63, 95, .55);
-            --blue: #4a90d9;
-            --amber: #ffc35c;
-            --text: #dce8f7;
-            --dim: #6b86a6;
-            --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
-            --sans: 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-            --shadow: 0 2px 16px rgba(0, 0, 0, .35);
-        }
+        /* 设计 tokens 在 ui/shared.css（唯一事实源），本页只留布局与组件皮肤 */
         * { box-sizing: border-box; }
         body {
             margin: 0; height: 100vh; overflow: hidden;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            background: #05070d; color: var(--text); font-family: var(--sans);
+            background: var(--bg); color: var(--text); font-family: var(--sans);
             -webkit-tap-highlight-color: transparent;
         }
         /* 极淡的坐标点阵，给黑底一点「任务控制台」的质感 */
@@ -37,7 +26,19 @@
             letter-spacing: 18px; padding-left: 18px;   /* 抵消最后一个字母的间距，保持视觉居中 */
             color: var(--text);
         }
-        header .rule { width: 220px; height: 1px; background: var(--line); margin: 18px auto 0; }
+        header .rule {
+            width: 220px; height: 7px; margin: 16px auto 0; position: relative;
+            border-bottom: 1px solid var(--line-strong);
+        }
+        /* 刻度尺线：基线上等距短刻度，中央一枚琥珀长针 */
+        header .rule::before {
+            content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
+            background: repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 24px);
+        }
+        header .rule::after {
+            content: ''; position: absolute; left: 50%; bottom: 0; width: 1px; height: 7px;
+            background: var(--amber);
+        }
         .menu-row {
             display: flex; flex-direction: column; gap: 12px; position: relative;
             width: min(300px, calc(100vw - 40px));
@@ -45,22 +46,26 @@
         .btn {
             display: flex; align-items: center; justify-content: space-between;
             padding: 14px 20px;
-            background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 3px;
             color: var(--text); font-size: 16px; letter-spacing: 3px; text-decoration: none;
-            box-shadow: var(--shadow); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-            transition: border-color .2s, background .2s;
+            box-shadow: var(--shadow);
+            transition: border-color .14s ease-out, background .14s ease-out, box-shadow .14s ease-out;
         }
         .btn::after {
             content: ''; width: 7px; height: 7px; flex: none;
             border-top: 1.5px solid var(--dim); border-right: 1.5px solid var(--dim);
             transform: rotate(45deg);
         }
-        .btn:hover { border-color: var(--blue); background: rgba(74, 144, 217, .1); }
+        .btn:hover {
+            border-color: var(--blue); background: rgba(74, 144, 217, .1);
+            box-shadow: inset 2px 0 0 var(--amber), var(--shadow);   /* 左缘琥珀滑条 */
+        }
         .btn:hover::after { border-color: var(--blue); }
         .btn:active { background: rgba(74, 144, 217, .18); }
         #ship-line {
-            margin-top: 34px; color: var(--dim); font-size: 13px;
+            margin-top: 34px; color: var(--dim); font-size: 12.5px;
             font-family: var(--mono); letter-spacing: 1px;
+            font-variant-numeric: tabular-nums;
             position: relative; text-align: center; padding: 0 20px;
         }
         #bgm-hint {
