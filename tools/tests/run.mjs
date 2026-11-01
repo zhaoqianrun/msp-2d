@@ -818,6 +818,34 @@ test('[分级] 侧挂分离器：切不断船体 → 整根脱离', () => {
 // ============================================================
 
 console.log('\n==========================================');
+test('[守卫] 渲染循环无帧错误（开伞/分级/切船后仍每帧完整执行）', () => {
+    // 回归：drawChute 曾因引用未定义的 P 让每帧抛错被防护网吞掉——
+    // 表现为整帧冻结、啥都没法做（用户实测）。这类错误必须在这里现形。
+    window.__lastGameError = undefined;   // 清掉前面用例可能残留的帧错误基线
+    t.setShipDef({ version: 1, name: '守卫船', parts: [
+        { id: 'w0', type: 'capsule',   x: 0, y: 0 },
+        { id: 'w1', type: 'chute',     x: 0, y: 2 },
+        { id: 'w2', type: 'decoupler', x: 0, y: 4 },
+        { id: 'w3', type: 'tank',      x: 0, y: 6 },
+        { id: 'w4', type: 'engine',    x: 0, y: 8 },
+    ]});
+    t.vessels.splice(1);
+    t.resetInterp();
+    t.chuteStates.w1 = 'open';          // 开伞（drawChute 每帧执行）
+    t.activateNextStage();              // 分级激活（切断/开伞/警告路径全走）
+    env.pumpFrames(30);
+    if (t.vessels[1] && t.vesselHasCapsule(t.vessels[1])) {
+        t.activateVessel(t.vessels[1].id);   // 切船
+    }
+    env.pumpFrames(30);
+    assert(window.__lastGameError === undefined || window.__lastGameError === null,
+           '渲染循环有帧错误: ' + (window.__lastGameError && window.__lastGameError.message));
+    resetToGround();
+    env.pumpFrames(10);
+    assert(window.__lastGameError === undefined || window.__lastGameError === null,
+           '切船后渲染循环仍有帧错误');
+});
+
 console.log(`结果：${passed} 通过，${failed} 失败`);
 if (failed > 0) {
     console.log('\n失败用例：');
