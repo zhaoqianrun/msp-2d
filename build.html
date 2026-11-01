@@ -529,13 +529,14 @@ function drawPart(p, isSelected) {
             const qt = PART_TYPES[q.type];
             return x0 < q.x + qt.w && x1 > q.x && y0 < q.y + qt.h && y1 > q.y;
         });
-        const aUp = band(p.x - 1, p.x + t.w + 1, p.y - 1, p.y);
-        const aDown = band(p.x - 1, p.x + t.w + 1, p.y + t.h, p.y + t.h + 1);
+        // 网格 y 轴向上：p.y-1..p.y 是网格下方（屏幕下方）
+        const aBelow = band(p.x - 1, p.x + t.w + 1, p.y - 1, p.y);
+        const aAbove = band(p.x - 1, p.x + t.w + 1, p.y + t.h, p.y + t.h + 1);
         const aLeft = band(p.x - 1, p.x, p.y - 1, p.y + t.h + 1);
         const aRight = band(p.x + t.w, p.x + t.w + 1, p.y - 1, p.y + t.h + 1);
         const sx = (r.w - pw) / 2, sy = (r.h - ph) / 2;
         const px = r.x + sx + (aRight ? sx : 0) - (aLeft ? sx : 0);
-        const py = r.y + sy + (aDown ? sy : 0) - (aUp ? sy : 0);
+        const py = r.y + sy + (aBelow ? sy : 0) - (aAbove ? sy : 0);
         const grad = ctx.createLinearGradient(px, 0, px + pw, 0);
         grad.addColorStop(0, '#7a4a16'); grad.addColorStop(0.4, '#b5762a'); grad.addColorStop(1, '#8a5a20');
         roundRect(ctx, px, py, pw, ph, 5);

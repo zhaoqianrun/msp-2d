@@ -2640,9 +2640,11 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 return x0 < q.x + qt.w && x1 > q.x && y0 < q.y + qt.h && y1 > q.y;
             });
             const W = part.x, E = part.x + t.w, S = part.y, N = part.y + t.h;
+            // 注意网格 y 轴向上：S-1..S 是网格下方（屏幕上也是下方），
+            // N..N+1 是网格上方。字段名用 below/above（网格语义），避免与屏幕方向混淆。
             return {
-                up:    band(W - 1, E + 1, S - 1, S),
-                down:  band(W - 1, E + 1, N, N + 1),
+                below: band(W - 1, E + 1, S - 1, S),
+                above: band(W - 1, E + 1, N, N + 1),
                 left:  band(W - 1, W, S - 1, N + 1),
                 right: band(E, E + 1, S - 1, N + 1),
             };
@@ -2693,7 +2695,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 const sx = (w - pw) / 2, sy = (h - ph) / 2;
                 const anc = anchor || {};
                 const px = x + sx + (anc.right ? sx : 0) - (anc.left ? sx : 0);
-                const py = y + sy + (anc.down ? sy : 0) - (anc.up ? sy : 0);
+                // 网格下方 = 屏幕下方：有结构就贴下去
+                const py = y + sy + (anc.below ? sy : 0) - (anc.above ? sy : 0);
                 const grad = c.createLinearGradient(px, 0, px + pw, 0);
                 grad.addColorStop(0, '#7a4a16'); grad.addColorStop(0.4, '#b5762a'); grad.addColorStop(1, '#8a5a20');
                 shipRoundRect(c, px, py, pw, ph, pw * 0.28);
