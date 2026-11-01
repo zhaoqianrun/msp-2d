@@ -3013,44 +3013,20 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 orbitLine = `近地点: ${fmtDistance(rp)} | 远地点: ${fmtDistance(ra)}` + (rp < 0 ? '  ← 会撞上星球' : '');
             }
 
-            // —— 飞行数据面板（HTML 结构见 play-main.html 的 #hud-panel）——
-            // 原来这里是一面 7 行 innerText 文本墙；现在拆写进分层子元素：
-            // 大数字（速度/高度）→ 状态行（状态/油门/燃料）→ 小字行（角度/轨道/大气/飞船/统计/协同）。
-            // 元素引用缓存在 gameLoopInner 上，整个会话只 getElementById 一次。
-            // 注意：#hud 本身只用于观战端「等待操控端连接...」消息，不能把子元素塞进它里面。
-            const HE = gameLoopInner.__hudEls || (gameLoopInner.__hudEls = {
-                speed:  document.getElementById('hud-speed'),
-                alt:    document.getElementById('hud-alt'),
-                status: document.getElementById('hud-status'),
-                thr:    document.getElementById('hud-thr'),
-                fuel:   document.getElementById('hud-fuel'),
-                angle:  document.getElementById('hud-angle'),
-                zoom:   document.getElementById('hud-zoom'),
-                orbit:  document.getElementById('hud-orbit'),
-                orbitV: document.getElementById('hud-orbit-v'),
-                atmo:   document.getElementById('hud-atmo'),
-                ship:   document.getElementById('hud-ship'),
-                stats:  document.getElementById('hud-stats'),
-                coop:   document.getElementById('hud-coop'),
-            });
-            if (HE.speed) HE.speed.innerText = fmtSpeed(speedNum);
-            if (HE.alt) HE.alt.innerText = fmtDistance(surfaceDist);
-            if (HE.status) {
-                HE.status.innerText = statusText;
-                HE.status.className = rocket.landed ? 'landed' : (rocket.state === 'firing' ? 'firing' : '');
-            }
-            if (HE.thr) HE.thr.innerText = Math.round(rocket.throttle * 100) + '%';
-            if (HE.fuel) HE.fuel.innerText = Math.round(rocket.fuel * 100) + '%';
-            if (HE.angle) HE.angle.innerText = Math.round(rocket.angle) + '°';
-            if (HE.zoom) HE.zoom.innerText = camera.zoom.toFixed(2) + 'x';
-            if (HE.orbit) HE.orbit.innerText = orbitLine;
-            if (HE.orbitV) HE.orbitV.innerText = `圆轨道速度: ${fmtSpeed(vCirc)} | 逃逸速度: ${fmtSpeed(vEsc)}` + orbitHint;
-            if (HE.atmo) HE.atmo.innerText = atmoStatusText() + heatLine();
-            if (HE.ship) HE.ship.innerText =
-                `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m | 质量: ${shipMass(rocket.fuel).toFixed(0)} 单位 | ${chuteHudLine()}`;
-            if (HE.stats) HE.stats.innerText =
-                `已绕: ${stats.orbits} 圈 | 成就: ${achieved.size} / ${achievements.length}（按 C 查看） | 音乐: ${bgmMuted ? '关' : '开'}`;
-            if (HE.coop) HE.coop.innerText = coopLine();
+            // —— 飞行数据 HUD：经典终端风文本块。布局按信息层级重排：
+            // 飞行主数据（速度/高度）→ 状态 → 姿态/进度 → 轨道 → 大气 → 飞船 → 统计/协同，
+            // 每行控制在 ~30 字符内，窄屏折行也不丢信息。 ——
+            hud.innerText =
+                `速度: ${fmtSpeed(speedNum)}　高度: ${fmtDistance(surfaceDist)}\n` +
+                `状态: ${statusText}　油门: ${Math.round(rocket.throttle * 100)}%　燃料: ${Math.round(rocket.fuel * 100)}%\n` +
+                `角度: ${Math.round(rocket.angle)}°　缩放: ${camera.zoom.toFixed(2)}x　已绕: ${stats.orbits} 圈\n` +
+                orbitLine + '\n' +
+                `圆轨道: ${fmtSpeed(vCirc)}　逃逸: ${fmtSpeed(vEsc)}${orbitHint}\n` +
+                `${atmoStatusText()}${heatLine()}\n` +
+                `飞船: ${shipSizeMeters().w.toFixed(2)} × ${shipSizeMeters().h.toFixed(2)} m　质量: ${shipMass(rocket.fuel).toFixed(0)}　${chuteHudLine()}\n` +
+                `成就: ${achieved.size} / ${achievements.length}（按 C 查看）　音乐: ${bgmMuted ? '关' : '开'}\n` +
+                coopLine();
+
 
             // 顶部的部件清单 + 右上角时间倍率
             renderPartsBar();

@@ -39,56 +39,17 @@
             z-index: 5; pointer-events: none;
             display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
         }
-        #hud-panel {
-            width: min(348px, calc(100vw - 20px));
-            background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-            box-shadow: var(--shadow); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-            padding: 12px 14px;
-        }
-        /* 观战端等待消息（js/main.js 会写 innerText；平时为空整行隐藏） */
+        /* 飞行数据 HUD：经典终端风文本块（js/main.js 写 innerText，按信息
+           层级分行；宽度自适应、超长自动折行不丢字） */
         #hud {
-            font-family: var(--mono); font-size: 12px; color: var(--amber);
-            padding-bottom: 8px; margin-bottom: 8px;
-            border-bottom: 1px solid var(--line-soft);
+            color: #0f0;
+            font-family: ui-monospace, Consolas, 'Courier New', monospace;
+            font-size: 13px; line-height: 1.6;
+            text-shadow: 1px 1px 2px #000;
+            white-space: pre-wrap; word-break: break-all;
+            width: clamp(300px, calc(100vw - 470px), 560px);
         }
         #hud:empty { display: none; }
-        /* 第一层：速度 / 高度 —— 大号数字，小号标签 */
-        .hud-primary { display: flex; gap: 30px; }
-        .metric .lab {
-            display: block; font-size: 10px; letter-spacing: 2px;
-            color: var(--dim); margin-bottom: 2px;
-        }
-        .metric .val {
-            font-family: var(--mono); font-size: 24px; font-weight: 600;
-            color: var(--text); line-height: 1.1; white-space: nowrap;
-        }
-        /* 第二层：状态 / 油门 / 燃料 —— 一行小状态 */
-        .hud-state {
-            display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-            margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line-soft);
-        }
-        .hud-cell { display: inline-flex; align-items: baseline; gap: 5px; }
-        .hud-cell .lab { font-size: 10px; letter-spacing: 1px; color: var(--dim); }
-        .hud-cell .val { font-family: var(--mono); font-size: 13px; color: var(--text); }
-        #hud-thr { color: var(--amber); }
-        #hud-fuel { color: #7fb8e8; }
-        #hud-status { font-size: 12px; color: var(--text);
-                      display: inline-flex; align-items: center; gap: 6px; }
-        #hud-status::before {
-            content: ''; width: 6px; height: 6px; border-radius: 50%;
-            background: var(--blue); flex: none;
-        }
-        #hud-status.landed { color: var(--green); }
-        #hud-status.landed::before { background: var(--green); }
-        #hud-status.firing { color: var(--amber); }
-        #hud-status.firing::before { background: var(--amber); }
-        /* 第三层：轨道 / 大气 / 飞船 / 统计 / 协同 —— 小字 */
-        .hud-subs { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
-        .hud-sub {
-            font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
-            color: var(--dim);
-        }
-        .hud-sub .val { font-family: var(--mono); }
 
         /* ==================== 部件栏 ==================== */
         /* 跟在数据面板下面；chips 由 js/main.js 生成（class 名固定） */
@@ -349,10 +310,7 @@
            左右下角让给触控垫；键位帮助直接收起（触控用户用不到键盘） */
         @media (max-height: 620px) {
             #top-left { top: 96px; }
-            #hud-panel { width: min(320px, calc(100vw - 20px)); padding: 9px 12px; }
-            .metric .val { font-size: 18px; }
-            .hud-primary { gap: 22px; }
-            .hud-sub { font-size: 10.5px; line-height: 1.45; }
+            #hud { font-size: 11px; line-height: 1.5; width: calc(100vw - 20px); }
             .sys-row { flex-wrap: nowrap; }
             #throttle-bar { left: calc(50% - 48px); bottom: 14px; height: 120px; }
             #fuel-bar { left: calc(50% + 28px); bottom: 14px; height: 120px; }
@@ -374,35 +332,9 @@
 
     <!-- 左上：飞行数据（分层玻璃面板）+ 部件栏。
          #hud 只承载观战端的「等待操控端连接...」消息（main.js 写 innerText），
-         平时为空自动隐藏；飞行数据由豁免块写进下面各子元素。 -->
+         观战端等待消息写这里；:empty 时空行自动隐藏。 -->
     <div id="top-left">
-        <div id="hud-panel">
-            <div id="hud"></div>
-            <div class="hud-primary">
-                <div class="metric">
-                    <span class="lab">速度</span>
-                    <span class="val" id="hud-speed"></span>
-                </div>
-                <div class="metric">
-                    <span class="lab">高度</span>
-                    <span class="val" id="hud-alt"></span>
-                </div>
-            </div>
-            <div class="hud-state">
-                <span class="hud-cell"><span class="lab">状态</span><span id="hud-status"></span></span>
-                <span class="hud-cell"><span class="lab">油门</span><span class="val" id="hud-thr"></span></span>
-                <span class="hud-cell"><span class="lab">燃料</span><span class="val" id="hud-fuel"></span></span>
-            </div>
-            <div class="hud-subs">
-                <div class="hud-sub">角度 <span class="val" id="hud-angle"></span> · 缩放 <span class="val" id="hud-zoom"></span></div>
-                <div class="hud-sub" id="hud-orbit"></div>
-                <div class="hud-sub" id="hud-orbit-v"></div>
-                <div class="hud-sub" id="hud-atmo"></div>
-                <div class="hud-sub" id="hud-ship"></div>
-                <div class="hud-sub" id="hud-stats"></div>
-                <div class="hud-sub" id="hud-coop"></div>
-            </div>
-        </div>
+        <div id="hud"></div>
         <div id="parts-bar"></div>
     </div>
 
