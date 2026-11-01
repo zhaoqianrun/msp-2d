@@ -424,11 +424,11 @@ test('[输入] 100x 下旋转按真实时间响应：10 帧约 15°，不再一�
 test('[预测] 缓存命中时锚点不漂移（渲染平移贴合船的契约）', () => {
     const a = { x: planet.x + 1000, y: planet.y - (planet.radius + 100000), vx: 2000, vy: 0 };
     const b = { x: planet.x + 5000, y: planet.y - (planet.radius + 100000), vx: 2000, vy: 0 };
-    t.predictPath(a, true, 80000000);
+    t.predictPath(a, true, 90000000);               // 独立的 now，避免撞前面用例的缓存
     near(predictPathOrigin().x, a.x, 1e-6, '首次计算锚点=计算时位置');
-    t.predictPath(b, true, 80000000 + 30);          // 30ms 内 → 缓存命中
+    t.predictPath(b, true, 90000000 + 30);          // 30ms 内 → 缓存命中
     near(predictPathOrigin().x, a.x, 1e-6, '缓存命中锚点不应更新为新位置');
-    t.predictPath(b, true, 80000000 + 500);         // 超过自适应间隔 → 重算
+    t.predictPath(b, true, 90000000 + 500);         // 超过自适应间隔 → 重算
     near(predictPathOrigin().x, b.x, 1e-6, '重算后锚点跟上新状态');
 });
 
