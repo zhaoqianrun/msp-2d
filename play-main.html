@@ -39,6 +39,48 @@
             z-index: 5; pointer-events: none;
             display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
         }
+        /* 分级堆栈面板（KSP 式，自底向上；:empty 自动隐藏） */
+        #stage-stack {
+            position: absolute; left: 14px; bottom: 385px;
+            display: flex; flex-direction: column; gap: 4px;
+            font-family: var(--mono); font-size: 11px;
+            pointer-events: none;
+        }
+        #stage-stack:empty { display: none; }
+        #stage-stack .stg {
+            background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+            padding: 3px 9px; color: var(--dim);
+            display: flex; align-items: center; gap: 8px;
+        }
+        #stage-stack .stg .stg-n {
+            font-weight: 600; color: var(--text); min-width: 14px; text-align: center;
+        }
+        #stage-stack .stg.next {
+            border-color: var(--amber); color: var(--amber);
+        }
+        #stage-stack .stg.done { opacity: .38; text-decoration: line-through; }
+
+        /* 分级堆栈面板（KSP 式，自底向上；:empty 自动隐藏） */
+        #stage-stack {
+            position: absolute; left: 14px; bottom: 385px;
+            display: flex; flex-direction: column; gap: 4px;
+            font-family: var(--mono); font-size: 11px;
+            pointer-events: none;
+        }
+        #stage-stack:empty { display: none; }
+        #stage-stack .stg {
+            background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+            padding: 3px 9px; color: var(--dim);
+            display: flex; align-items: center; gap: 8px;
+        }
+        #stage-stack .stg .stg-n {
+            font-weight: 600; color: var(--text); min-width: 14px; text-align: center;
+        }
+        #stage-stack .stg.next {
+            border-color: var(--amber); color: var(--amber);
+        }
+        #stage-stack .stg.done { opacity: .38; text-decoration: line-through; }
+
         /* 飞行数据 HUD：经典终端风文本块（js/main.js 写 innerText，按信息
            层级分行；宽度自适应、超长自动折行不丢字） */
         #hud {
@@ -311,6 +353,8 @@
         @media (max-height: 620px) {
             #top-left { top: 96px; }
             #hud { font-size: 11px; line-height: 1.5; width: calc(100vw - 20px); }
+            #stage-stack { display: none; }
+            #stage-stack { display: none; }
             .sys-row { flex-wrap: nowrap; }
             #throttle-bar { left: calc(50% - 48px); bottom: 14px; height: 120px; }
             #fuel-bar { left: calc(50% + 28px); bottom: 14px; height: 120px; }
@@ -341,6 +385,8 @@
     <!-- 左右竖条：填充由 JS 写内联样式，容器/刻度/边框在这里 -->
     <div id="throttle-bar"><div id="throttle-fill"></div></div>
     <div id="throttle-text">油门 100%</div>
+    <div id="stage-stack"></div>
+    <div id="stage-stack"></div>
     <div id="fuel-bar"><div id="fuel-fill"></div></div>
     <div id="fuel-text">燃料 100%</div>
 

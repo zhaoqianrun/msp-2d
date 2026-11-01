@@ -726,8 +726,32 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         if (timeDownEl) timeDownEl.addEventListener('click', () => cycleTimeScale(-1));
         if (timeUpEl) timeUpEl.addEventListener('click', () => cycleTimeScale(1));
 
+        // ==================== 分级堆栈面板 ====================
+        // 每帧比对签名，只有分级状态变化才重建 DOM。
+        // 显示：自底向上，最下面一行 = 下一次按空格将激活的分级。
+        let stageStackSig = '';
+        function renderStageStack() {
+            if (!stageStackEl) return;
+            const acts = computeStageActions();
+            const sig = acts.map(a => a.stage + a.kind[0] + (stagePending(a) ? '1' : '0')).join(',');
+            if (sig === stageStackSig) return;
+            stageStackSig = sig;
+            const stages = [];
+            for (const a of acts) (stages[a.stage] = stages[a.stage] || []).push(a);
+            let html = '';
+            for (let i = stages.length - 1; i >= 0; i--) {
+                const items = stages[i] || [];
+                const pending = items.some(stagePending);
+                const tags = items.map(a => a.kind === 'sever' ? '分' : '伞').join('+');
+                html += '<div class="stg' + (pending ? ' next' : ' done') + '">'
+                    + '<span class="stg-n">' + (i + 1) + '</span><span>' + tags + '</span></div>';
+            }
+            stageStackEl.innerHTML = html;
+        }
+
         // 顶部「本航天器还剩什么零件」
         const partsBarEl = document.getElementById('parts-bar');
+        const stageStackEl = document.getElementById('stage-stack');
         let partsBarCache = '';
 
         function renderPartsBar() {
@@ -861,6 +885,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 landed: false,
                 heat: 0,
                 spin: 0,              // 角速度（°/s）：分离/撞击带来的翻滚
+                chutes: {},           // 这艘船的伞状态（部件id → packed/open/cut）
                 // 注意：下面三个用「短名字」hp/temp/dead，
                 // 和主船视图（mainView）保持同一套字段名，
                 // 这样物理代码不需要区分「这是玩家船还是残骸」。
@@ -1010,10 +1035,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // 炸毁 ∪ 切断：两者都不再把部件粘在一起（分离器切断用）
         function allDead() { return new Set([...destroyed, ...severed]); }
 
-        // 炸完之后检查：船是不是断成几截了
-        function checkSeparation() {
+        // 炸完之后检查：船是不是断成几截了（axial=true 走分级轴向冲量）
+        function checkSeparation(axial) {
             if (findConnectedGroups(shipDef.parts, allDead()).length > 1) {
-                splitVessel();
+                splitVessel(axial);
                 if (vessels.length >= 3) unlock('derelict_keeper');
             }
         }
@@ -1097,6 +1122,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             // 修好所有部件
             destroyed.clear();
             severed.clear();
+            chuteStates = {};   // 伞全部重新包好
             partHP = initPartHP();
             partTemp = initPartTemp();
             debris = [];
@@ -1114,7 +1140,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             // 满油落地
             rocket.fuel = 1;
             lastComFuel = -1;
-            chuteState = 'packed';
             rocket.throttle = 1;
             rocket.state = 'idle';
             rocket.angle = 90;
@@ -1147,6 +1172,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             SPEC = shipSpec(shipDef);
             destroyed = new Set();
             severed.clear();   // 新船没有已切断的分离器
+            chuteStates = {};  // 新船的伞全部包好
             partHP = initPartHP();
             partTemp = initPartTemp();
             invalidateShipCache();
@@ -1158,7 +1184,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             rocket.angle = 90;   // 新发射的船竖直立在发射台（别继承上一艘的姿态）
             placeOnSurface(opts && opts.offsetDeg);
             resetInterp();
-            chuteState = 'packed';   // 新船的伞是包好的
         }
 
         // ==================== 多船共存：旧船归档 ====================
@@ -1191,6 +1216,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             old.heat = rocket.heat || 0;
             old._impactCooldown = 0;
             old._impactBudget = {};
+            old.chutes = chuteStates;   // 伞状态跟着船走
             const idx = vessels.indexOf(mainView);
             if (idx >= 0) vessels[idx] = old; else vessels.push(old);
             return true;
@@ -1217,6 +1243,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     sig: shipPartsSig(pristineShip.parts),   // 用「这一局的完好船」做签名
                     ship: shipDef,                            // 当前主船（分离后可能只剩一截）
                     destroyed: [...destroyed],
+                    chutes: chuteStates,
                     hp: partHP,
                     rocket: {
                         x: rocket.x, y: rocket.y, vx: rocket.vx, vy: rocket.vy,
@@ -1225,7 +1252,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     },
                     camera: { x: camera.x, y: camera.y, zoom: camera.zoom },
                     vessels: vessels.filter(v => v.id !== activeVesselId).map(v => ({
-                        def: v.def, hp: v.hp, temp: v.temp, dead: [...v.dead],
+                        def: v.def, hp: v.hp, temp: v.temp, dead: [...v.dead], chutes: v.chutes || {},
                         x: v.x, y: v.y, vx: v.vx, vy: v.vy, angle: v.angle,
                         fuel: v.fuel, throttle: v.throttle, state: v.state,
                         landed: v.landed, heat: v.heat || 0,
@@ -1263,6 +1290,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     partHP[p.id] = (d.hp && typeof d.hp[p.id] === 'number') ? d.hp[p.id] : (PART_HP[p.type] || 100);
                 }
                 partTemp = initPartTemp();
+                chuteStates = d.chutes || {};   // 恢复各伞状态（缺省 packed）
                 invalidateShipCache();
                 if (d.rocket && typeof d.rocket === 'object') Object.assign(rocket, d.rocket);
                 lastComFuel = -1;
@@ -1285,6 +1313,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                         v.state = w.state || 'idle';
                         v.landed = !!w.landed;
                         v.heat = w.heat || 0;
+                        v.chutes = w.chutes || {};
                         vessels.push(v);
                     }
                 }
@@ -1351,6 +1380,9 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // 返回新产生的那些（不含仍然操控中的那艘）
         function splitVessel(axial) {
             const groups = findConnectedGroups(shipDef.parts, allDead());
+            // 先捕获被切断部件的对象引用（此刻 shipDef 里还有它们；
+            // 主分支重设 shipDef 后就只能靠这里的引用找回）
+            const severedParts = shipDef.parts.filter(p => severed.has(p.id));
             if (groups.length <= 1) return [];
 
             // 挑出有控制舱的那组当主角；没有就挑最大的那组
@@ -1421,6 +1453,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 }
                 v.def.name = '残骸 ' + v.id.slice(1);
                 v.spin = (Math.random() - 0.5) * 40;   // 爆炸冲量 → 随机翻滚
+                // 伞状态跟着部件走到对应截
+                for (const p of g) {
+                    if (chuteStates[p.id] !== undefined) v.chutes[p.id] = chuteStates[p.id];
+                }
                 vessels.push(v);
                 born.push(v);
             });
@@ -1453,6 +1489,28 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 name: '飞船断成 ' + groups.length + ' 截',
                 desc: born.length + ' 截失控，只有带控制舱的那截能操控',
             });
+            // severed（分离器切断）的部件不在任何组里——重新挂到相邻的 born 截，
+            // 并带走自己的伞状态。分离器本体跟着被抛的那一级走。
+            const orphans = severedParts;
+            for (const op of orphans) {
+                const ot = PART_TYPES[op.type];
+                const home = born.find(v => v.def.parts.some(q => {
+                    const qt = PART_TYPES[q.type];
+                    return op.x <= q.x + qt.w + 1 && op.x + ot.w >= q.x - 1 &&
+                           op.y <= q.y + qt.h + 1 && op.y + ot.h >= q.y - 1;
+                })) || born[0];
+                if (home) {
+                    home.def.parts.push(op);
+                    home.spec = shipSpec(home.def);
+                    home.hp[op.id] = home.hp[op.id] || (PART_HP[op.type] || 80);
+                    home.temp[op.id] = home.temp[op.id] || AMBIENT_TEMP;
+                    if (chuteStates[op.id] !== undefined) home.chutes[op.id] = chuteStates[op.id];
+                }
+                severed.delete(op.id);
+            }
+            invalidateShipCache();
+            lastComFuel = -1;
+
             unlock('split_vessel');
             if (vessels.length >= 3) unlock('derelict_keeper');
             return born;
@@ -1489,6 +1547,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             old.heat = rocket.heat || 0;
             old._impactCooldown = 0;
             old._impactBudget = {};
+            old.chutes = chuteStates;   // 旧船的伞状态跟着船走
             const idx = vessels.indexOf(mainView);
             if (idx >= 0) vessels[idx] = old; else vessels.push(old);
             // 2) 目标状态换入船位
@@ -1505,6 +1564,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             rocket.state = target.state === 'firing' ? 'idle' : target.state;
             rocket.landed = target.landed;
             rocket.heat = target.heat || 0;
+            chuteStates = target.chutes || {};   // 接管目标的伞状态
             // 3) 目标槽位换回主视图：mainView 必须留在 vessels 里
             //    （船-船碰撞、状态上报都遍历 vessels；invariant：列表里
             //    恒有且仅有一个 mainView 条目，id = activeVesselId）
@@ -1514,7 +1574,6 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             invalidateShipCache();
             resetImpactBudget();
             resetInterp();
-            chuteState = 'packed';   // 目标船的伞是包好的（chuteState 是全局的，别把上一艘的伞状态带过来）
             toastQueue.push({
                 title: '切 换 操 控',
                 name: shipDef.name || '已接管航天器',
@@ -1540,62 +1599,62 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             });
         }
 
-        // ==================== 分离器（分级火箭）====================
-        // 空格：切断最下面一根「切得断船体」的分离器——下级沿船轴抛离，
-        // 上面级继续飞。切断 ≠ 炸毁：分离器本体还活着，只是不再把两侧
-        // 粘在一起（severed 集合），并跟随被抛离的那一级走。
-        function activateDecoupler() {
-            const candidates = shipDef.parts
+        // ==================== 分级系统（KSP 式）====================
+        // 分级 = 一组待触发动作（切断分离器 / 展开该级降落伞）。
+        // 自动规则：分离器按 y 升序（自底向上）= 第 0..n-1 级；
+        // 降落伞默认属于「所在段 +1」级（段被抛离后下一回合开伞）。
+        // 造船厂可为每个动作部件指定 stage 覆盖默认值。
+        function stageOf(part) {
+            if (typeof part.stage === 'number') return part.stage;
+            const decs = shipDef.parts
                 .filter(p => p.type === 'decoupler' && !destroyed.has(p.id) && !severed.has(p.id))
-                .sort((a, b) => b.y - a.y);          // 分级惯例：先抛最下面一级（y 轴向上，底级 y 最大）
-            if (candidates.length === 0) {
-                toastQueue.push({ title: '没 有 分 离 器', name: '造船厂里装一个吧', desc: '部件列表 > 分离器' });
+                .sort((a, b) => b.y - a.y);   // 底级先抛（分级惯例）：y 最大的分离器 = 第 0 级
+            if (part.type === 'decoupler') return decs.indexOf(part);
+            // 降落伞：所在段 = 比它位置低的分离器数量；开伞排在下一段
+            return Math.min(decs.filter(d => d.y < part.y).length, decs.length);
+        }
+        function computeStageActions() {
+            const list = [];
+            for (const p of shipDef.parts) {
+                if (destroyed.has(p.id) || severed.has(p.id)) continue;
+                if (p.type === 'decoupler') list.push({ stage: stageOf(p), kind: 'sever', part: p });
+                else if (p.type === 'chute') list.push({ stage: stageOf(p), kind: 'chute', part: p });
+            }
+            list.sort((a, b) => a.stage - b.stage);
+            return list;
+        }
+        function stagePending(a) {
+            if (a.kind === 'sever') return !severed.has(a.part.id);
+            return chuteStateOf(a.part.id) === 'packed';
+        }
+        // 空格：激活序号最小的未完成分级（执行该级全部动作）
+        function activateNextStage() {
+            const acts = computeStageActions().filter(stagePending);
+            if (acts.length === 0) {
+                toastQueue.push({ title: '没 有 分 级', name: '所有分级已用尽', desc: '分离器/降落伞都已动作完毕' });
                 return;
             }
-            // 找出真能把船体切成两截的那根（侧挂的切不断 → 整根自己飘走）
-            let chosen = null;
-            for (const d of candidates) {
-                severed.add(d.id);
-                if (findConnectedGroups(shipDef.parts, allDead()).length > 1) { chosen = d; break; }
-                severed.delete(d.id);
-            }
-            if (!chosen) {
-                severed.add(candidates[0].id);
-                detachSeveredParts();
-                toastQueue.push({ title: '分 离 器 脱 离', name: '它不在连接位置上', desc: '整根自己飘走了' });
-                unlock('first_staging');
-                return;
-            }
+            const stage = acts[0].stage;
+            const batch = acts.filter(a => a.stage === stage);
             const before = vessels.length;
-            splitVessel(true);
-            // 被切断的分离器本体跟下级走：分离时它不在任何连通组里
-            //（severed 被连通计算排除），splitVessel 重设 shipDef 后它就成了
-            // 「无主部件」—— 用 chosen 的对象引用把它挂到相邻的非主船那截上。
-            const ty = PART_TYPES.decoupler;
-            const home = vessels.find(v => v.id !== activeVesselId && v.def.parts.some(q => {
-                const qt = PART_TYPES[q.type];
-                return chosen.x <= q.x + qt.w + 1 && chosen.x + ty.w >= q.x - 1 &&
-                       chosen.y <= q.y + qt.h + 1 && chosen.y + ty.h >= q.y - 1;
-            }));
-            if (home) {
-                home.def.parts.push(chosen);
-                home.spec = shipSpec(home.def);
-                home.hp[chosen.id] = PART_HP.decoupler || 80;
-                home.temp[chosen.id] = AMBIENT_TEMP;
+            for (const a of batch) {
+                if (a.kind === 'sever') {
+                    severed.add(a.part.id);
+                } else {
+                    chuteStates[a.part.id] = 'open';
+                }
             }
-            severed.delete(chosen.id);
-            invalidateShipCache();
-            lastComFuel = -1;
-            if (vessels.length > before) {
-                unlock('first_staging');
-                toastQueue.push({
-                    title: '级 间 分 离',
-                    name: '下级已抛离',
-                    desc: '上面级继续飞行，按 V 可切换目标',
-                });
-            } else {
-                severed.delete(chosen.id);   // 兜底：没分成就不算切断
+            checkSeparation(true);                 // 轴向分离（若有截断）
+            if (vessels.length === before) {
+                detachSeveredParts();              // 没切断任何东西 → 侧挂/末端分离器整根脱离
             }
+            unlock('first_staging');
+            const names = batch.map(a => a.kind === 'sever' ? '分离' : '开伞').join(' + ');
+            toastQueue.push({
+                title: '激 活 分 级 ' + (stage + 1),
+                name: names,
+                desc: '剩余分级 ' + computeStageActions().filter(stagePending).length + ' 个',
+            });
         }
 
         // 侧挂 / 末端的分离器切不断船体：整个脱离成一艘单件小船
@@ -1806,7 +1865,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (e.code === 'KeyV') cycleVessel();
             if (e.code === 'Space') {
                 e.preventDefault();   // 防止空格滚动页面
-                activateDecoupler();
+                activateNextStage();
                 return;
             }
             if (e.code === 'KeyP') toggleChute();
@@ -2005,54 +2064,55 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         canvas.addEventListener('pointerleave', endPointer);
 
         // ==================== 降落伞 ====================
-        // 三种状态：packed 包好 / open 展开 / cut 切断（落地自动重包）。
-        // 减速 = DRAG_COEF × 伞面积 × 大气密度 × 速度²，实时按密度算：
+        // 状态按部件 id 存（packed/open/cut）——分级系统里每把伞独立展开。
+        // 减速 = DRAG_COEF × 伞面积 × 打开数量 × 大气密度 × 速度²，实时按密度算：
         // 高空几乎没用，越往下越猛，和真实降落伞一样。
-        const CHUTE_AREA = 1400;          // 等效阻力面积
+        const CHUTE_AREA = 1400;          // 等效阻力面积（每伞）
         const CHUTE_MIN_DENSITY = 0.004;  // 密度低于 0.4% 时伞基本没用
-        let chuteState = 'packed';
-        let chuteDragNow = 0;             // 当前伞减速度（HUD 显示用）
+        let chuteStates = {};             // { 部件id: packed/open/cut }
+        let chuteDragNow = 0;             // 当前伞总减速度（HUD 显示用）
+        function chuteStateOf(id) { return chuteStates[id] || 'packed'; }
+        function aliveChutes() {
+            return shipDef.parts.filter(p => p.type === 'chute' && !destroyed.has(p.id) && !severed.has(p.id));
+        }
 
         // 船上有没有降落伞（决定 P 键有没有意义）
         function hasChute() {
             return shipDef.parts.some(p => p.type === 'chute' && !destroyed.has(p.id));
         }
+        // P 键：批量切换——有展开的→全部切断；有包好的→全部展开；全切断→落地重包
         function toggleChute() {
-            if (!hasChute()) {
+            const chutes = aliveChutes();
+            if (chutes.length === 0) {
                 toastQueue.push({ title: '没 有 降 落 伞', name: '造船厂里装一个吧', desc: '部件列表 > 降落伞' });
                 return;
             }
-            if (chuteState === 'packed') {
-                chuteState = 'open';
+            const states = chutes.map(p => chuteStateOf(p.id));
+            if (states.includes('open')) {
+                chutes.forEach(p => { chuteStates[p.id] = 'cut'; });
+                toastQueue.push({ title: '降 落 伞 切 断', name: '伞飘走了', desc: '降落回地面后可以重新包伞' });
+            } else if (states.includes('packed')) {
+                chutes.forEach(p => { chuteStates[p.id] = 'open'; });
                 toastQueue.push({
                     title: '降 落 伞 展 开',
                     name: '高度 ' + fmtDistance(Math.hypot(rocket.x - planet.x, rocket.y - planet.y) - planet.radius),
                     desc: '再按 P 可以切断',
                 });
                 unlock('chute_open');
-            } else if (chuteState === 'open') {
-                chuteState = 'cut';
-                toastQueue.push({
-                    title: '降 落 伞 切 断',
-                    name: '伞飘走了',
-                    desc: '降落回地面后可以重新包伞',
-                });
+            } else if (rocket.landed) {
+                chutes.forEach(p => { chuteStates[p.id] = 'packed'; });
+                toastQueue.push({ title: '重 新 包 伞', name: '降落伞已折好', desc: '按 P 可以再次展开' });
             } else {
-                // 'cut' 状态：只有落地才能重新包
-                if (rocket.landed) {
-                    chuteState = 'packed';
-                    toastQueue.push({ title: '重 新 包 伞', name: '降落伞已折好', desc: '按 P 可以再次展开' });
-                } else {
-                    toastQueue.push({ title: '伞 已 切 断', name: '在空中没法重新包', desc: '落地后会自动重新包好' });
-                }
+                toastQueue.push({ title: '伞 已 切 断', name: '在空中没法重新包', desc: '落地后会自动重新包好' });
             }
         }
 
         // 落地自动重包（切断的伞也能折回来）
         function repackChuteIfLanded() {
-            if (!hasChute() || chuteState === 'packed') return;
-            const wasCut = chuteState === 'cut';
-            chuteState = 'packed';
+            const chutes = aliveChutes();
+            if (chutes.length === 0) return;
+            const wasCut = chutes.some(p => chuteStateOf(p.id) === 'cut');
+            chutes.forEach(p => { chuteStates[p.id] = 'packed'; });
             if (wasCut) {
                 toastQueue.push({
                     title: '降 落 伞 已 重 新 包 好',
@@ -2064,15 +2124,18 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
         // HUD 上那行降落伞状态
         function chuteHudLine() {
-            if (!hasChute()) return '无伞';
-            if (chuteState === 'packed') return '伞: 包好(P)';
-            if (chuteState === 'cut') return '伞: 已切断';
-            // 展开状态：显示当前减速度
-            const dens = atmosphereDensity(rocket.x, rocket.y);
-            if (dens < CHUTE_MIN_DENSITY) return '伞: 展开(无大气,无效)';
-            const g = SURFACE_GRAVITY_MS2 / M_PER_PX;
-            const ratio = chuteDragNow / Math.max(1e-9, g);
-            return '伞: 展开 ' + ratio.toFixed(1) + 'x重力';
+            const chutes = aliveChutes();
+            if (chutes.length === 0) return '无伞';
+            const openCount = chutes.filter(p => chuteStateOf(p.id) === 'open').length;
+            if (openCount > 0) {
+                const dens = atmosphereDensity(rocket.x, rocket.y);
+                if (dens < CHUTE_MIN_DENSITY) return '伞: 展开(无大气,无效)';
+                const g = SURFACE_GRAVITY_MS2 / M_PER_PX;
+                const ratio = chuteDragNow / Math.max(1e-9, g);
+                return '伞: 展开 ' + ratio.toFixed(1) + 'x重力 ×' + openCount;
+            }
+            if (chutes.every(p => chuteStateOf(p.id) === 'cut')) return '伞: 已切断';
+            return '伞: 包好(P)';
         }
 
         // ==== 物理更新 ====
@@ -2183,13 +2246,11 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     rocket.vx -= (rocket.vx / sp) * drag * dt;
                     rocket.vy -= (rocket.vy / sp) * drag * dt;
 
-                    // ---- 降落伞：实时按「伞面积 x 大气密度 x 速度²」减速 ----
-                    // 和空气阻力同一套公式，只是等效面积大得多。
-                    // 高空密度低 -> 几乎没用；越往下越猛 -> 和真实降落伞一样。
-                    // 必须先确认船上真的有伞：chuteState 是全局的，
-                    // 切船/换船后如果忘了重置，无伞船会吃「幽灵伞」阻力。
-                    if (chuteState === 'open' && hasChute() && dens > CHUTE_MIN_DENSITY) {
-                        const chuteDrag = DRAG_COEF * CHUTE_AREA * dens * sp * sp;
+                    // ---- 降落伞：每把打开的伞独立提供减速 ----
+                    // 面积 = 单伞面积 × 打开数量；分级系统里各伞可分别展开。
+                    const openChutes = aliveChutes().filter(p => chuteStateOf(p.id) === 'open');
+                    if (openChutes.length > 0 && dens > CHUTE_MIN_DENSITY) {
+                        const chuteDrag = DRAG_COEF * CHUTE_AREA * openChutes.length * dens * sp * sp;
                         chuteDragNow = chuteDrag;
                         rocket.vx -= (rocket.vx / sp) * chuteDrag * dt;
                         rocket.vy -= (rocket.vy / sp) * chuteDrag * dt;
@@ -2467,8 +2528,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // ==================== 画降落伞 ====================
         // 伞面永远朝「速度的反方向」张开（迎风面）——船往哪掉，伞就撑在哪边。
         // 展开程度随大气密度变化：密度低时伞瘪瘪的，越往下鼓得越圆。
-        function drawChute(c, vx, vy, dens, heat) {
-            if (chuteState !== 'open') return;
+        function drawChute(c, vx, vy, dens, heat, part) {
+            if (chuteStateOf(part.id) !== 'open') return;
             const sp = Math.hypot(vx, vy);
             if (sp < 0.5) return;   // 几乎静止时不画（避免抖动）
 
@@ -2484,21 +2545,25 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             // 伞面半径
             const radius = Math.max(SPEC.width, SPEC.height) * (0.55 + fill * 0.55);
 
-            // 伞心位置：在船体的「上方」（也就是速度反方向）
-            const cx = -ux * (ropeLen + radius * 0.25);
-            const cy = -uy * (ropeLen + radius * 0.25);
+            // 伞心位置：从伞包部件出发，朝速度反方向升起（每把伞锚在自身部件上）
+            const pt = PART_TYPES[part.type];
+            const partCX = (part.x + pt.w / 2 - SPEC.centerX) * P;
+            const partCY = (SPEC.box.maxY - (part.y + pt.h / 2)) * P;
+            const hang = ropeLen + radius * 0.25;
+            const cx = partCX - ux * hang;
+            const cy = partCY - uy * hang;
 
             c.save();
             if (heat > 0.05) c.globalAlpha = Math.max(0.45, 1 - heat * 0.6);   // 热流中布面变暗
 
-            // ---- 伞绳：从船体几个点连到伞心 ----
+            // ---- 伞绳：从伞包部件连到伞心 ----
             c.strokeStyle = 'rgba(220, 220, 220, 0.85)';
             c.lineWidth = Math.max(0.6, 1.1);
             c.beginPath();
             const anchors = [
-                [-SPEC.width * 0.35, -SPEC.height * 0.3],
-                [SPEC.width * 0.35, -SPEC.height * 0.3],
-                [0, -SPEC.height * 0.45],
+                [partCX - pt.w * P * 0.35, partCY],
+                [partCX + pt.w * P * 0.35, partCY],
+                [partCX, partCY],
             ];
             for (const a of anchors) {
                 c.moveTo(a[0], a[1]);
@@ -2932,8 +2997,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 ctx.globalAlpha = 1;
             }
 
-            // ---- 降落伞（画在辉光之后：伞是布，不跟船体一起被火光罩住）----
-            drawChute(ctx, rocket.vx, rocket.vy, atmosphereDensity(rocket.x, rocket.y), rocket.heat || 0);
+            // ---- 降落伞（画在辉光之后：每把打开的伞各自一顶，锚在自身部件上）----
+            for (const cp of aliveChutes()) {
+                drawChute(ctx, rocket.vx, rocket.vy, atmosphereDensity(rocket.x, rocket.y), rocket.heat || 0, cp);
+            }
             ctx.restore();
 
             ctx.restore();
@@ -3065,9 +3132,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 coopLine();
 
 
-            // 顶部的部件清单 + 右上角时间倍率
+            // 顶部的部件清单 + 右上角时间倍率 + 左下分级堆栈
             renderPartsBar();
             renderTimeBtn();
+            renderStageStack();
 
             // ==== 本局任务自动存档（每秒一次；观战端不存，免得用别人的画面覆盖自己的局）====
             if (!isSpectator() && now - lastMissionSave > 1000) {
@@ -3280,6 +3348,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     }
                     camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom));
                     resetInterp();   // 读档是传送：插值状态归位
+                    chuteStates = {};   // 读档的船伞全部重新包好
                     alert('读档成功！');
                 })
                 .catch(err => {
@@ -3323,10 +3392,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             toggleEngine, physicsStep, invalidateShipCache, shipPartsSig, fmtDistance, fmtSpeed,
             onKeyDown, blowUpPart, predictPath, rocketRenderPos, resetInterp,
             toggleChute, hasChute, shipTiltDeg, sanitizeShipDef, activateVessel, cycleVessel, vesselHasCapsule,
-            archiveCurrentShip, activateDecoupler,
+            archiveCurrentShip, activateNextStage, computeStageActions, stagePending,
             get severed() { return severed; },
-            get chuteState() { return chuteState; },
-            set chuteState(v) { chuteState = v; },   // 测试直接设伞状态
+            chuteStateOf, aliveChutes,
+            get chuteStates() { return chuteStates; },
             get chuteDragNow() { return chuteDragNow; },
             resetToasts,   // 测试用：清掉正在显示 + 排队中的全部横幅
         };

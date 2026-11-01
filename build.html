@@ -96,6 +96,25 @@
     #stats .v { color: var(--text); font-family: var(--mono); font-size: 12.5px; }
     #stats .warn { color: var(--red); }
     #stats .ok { color: #7fe0a8; }
+    #staging {
+        background: rgba(10, 18, 32, 0.94); border: 1px solid #24395a;
+        border-radius: 10px; padding: 10px 14px; font-size: 12px;
+    }
+    #staging h3 { color: #6b86a6; font-size: 11px; font-weight: normal; letter-spacing: 2px; margin: 0 0 6px; }
+    #staging .stg-row {
+        display: flex; align-items: center; gap: 6px;
+        padding: 3px 0; border-bottom: 1px solid #16233a;
+    }
+    #staging .stg-row:last-child { border-bottom: none; }
+    #staging .stg-n { color: #ffc35c; font-family: monospace; min-width: 34px; }
+    #staging .stg-item { color: #cfe2f7; display: inline-flex; align-items: center; gap: 4px; }
+    #staging .stg-btn {
+        background: #16233a; color: #8fb4dc; border: 1px solid #35506e;
+        border-radius: 4px; cursor: pointer; font-size: 10px; padding: 1px 5px;
+        font-family: inherit;
+    }
+    #staging .stg-btn:hover { background: #2a6db5; color: #fff; }
+    #staging .stg-empty { color: #5a6b80; }
 
     /* ===== 底部提示 ===== */
     #hint {
@@ -149,6 +168,10 @@
         <button class="tbtn danger" id="btn-del">删除选中</button>
     </div>
     <div id="stats"></div>
+    <div id="staging">
+        <h3>分 级</h3>
+        <div id="stage-list"></div>
+    </div>
 </div>
 <div id="hint">
     点左边的部件 → 再点画布放下　·　拖动已放置的部件可以移动　·　点部件选中后按「删除选中」<br>
@@ -845,6 +868,55 @@ function updateStats() {
     ];
     statsEl.innerHTML = rows.map(([k, val]) => '<div><span class="k">' + k + '</span><span class="v">' + val + '</span></div>').join('')
         + '<div style="margin-top:6px" class="' + (v.ok ? 'ok' : 'warn') + '">' + (v.ok ? '可以发射' : v.msg) + '</div>';
+    rebuildStaging();
+}
+
+// ==================== 分级面板（可调）====================
+// 自动规则：分离器按 y 降序（自底向上先抛）= 第 0..n 级；
+// 降落伞默认「所在段 +1」级（段抛离后下一回合开伞）。
+// 每个动作部件可用 ◀ ▶ 在相邻分级间移动，stage 字段随船保存。
+function stageIdxOf(p) {
+    if (typeof p.stage === 'number') return p.stage;
+    const decs = ship.parts.filter(q => q.type === 'decoupler').sort((a, b) => b.y - a.y);
+    if (p.type === 'decoupler') return decs.indexOf(p);
+    return Math.min(decs.filter(d => d.y < p.y).length, decs.length);
+}
+function shiftStage(id, dir) {
+    const p = ship.parts.find(q => q.id === id);
+    if (!p) return;
+    const decs = ship.parts.filter(q => q.type === 'decoupler').sort((a, b) => b.y - a.y);
+    p.stage = Math.max(0, Math.min(decs.length, stageIdxOf(p) + dir));
+    saveShip();
+    updateStats();
+    draw();
+}
+function shiftStageBtn(btn) { shiftStage(btn.dataset.id, Number(btn.dataset.dir)); }
+function rebuildStaging() {
+    const el = document.getElementById('stage-list');
+    if (!el) return;
+    const acts = [];
+    for (const p of ship.parts) {
+        if (p.type === 'decoupler') acts.push({ stage: stageIdxOf(p), kind: '分离', id: p.id });
+        else if (p.type === 'chute') acts.push({ stage: stageIdxOf(p), kind: '开伞', id: p.id });
+    }
+    if (acts.length === 0) {
+        el.innerHTML = '<div class="stg-empty">装分离器 / 降落伞后自动生成分级</div>';
+        return;
+    }
+    const stages = [];
+    for (const a of acts) (stages[a.stage] = stages[a.stage] || []).push(a);
+    let html = '';
+    for (let i = stages.length - 1; i >= 0; i--) {
+        const items = stages[i] || [];
+        html += '<div class="stg-row"><span class="stg-n">级 ' + (i + 1) + '</span>';
+        for (const a of items) {
+            html += '<span class="stg-item">' + a.kind
+                + '<button class="stg-btn" data-id="' + a.id + '" data-dir="-1" onclick="shiftStageBtn(this)">◀</button>'
+                + '<button class="stg-btn" data-id="' + a.id + '" data-dir="1" onclick="shiftStageBtn(this)">▶</button></span>';
+        }
+        html += '</div>';
+    }
+    el.innerHTML = html;
 }
 
 let toastTimer = null;

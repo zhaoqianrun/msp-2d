@@ -481,22 +481,22 @@ test('[降落伞] 状态机：展开 → 切断 → 落地重包', () => {
     t.resetInterp();
     assert(t.hasChute() === true, '应有伞');
     t.toggleChute();
-    assert(t.chuteState === 'open', 'P 后应展开');
+    assert(t.chuteStateOf('c2') === 'open', 'P 后应展开');
     t.toggleChute();
-    assert(t.chuteState === 'cut', '再按应切断');
+    assert(t.chuteStateOf('c2') === 'cut', '再按应切断');
     t.rocket.landed = true;
     t.toggleChute();
-    assert(t.chuteState === 'packed', '落地后按 P 应重包');
+    assert(t.chuteStateOf('c2') === 'packed', '落地后按 P 应重包');
     t.toggleChute();
-    assert(t.chuteState === 'open', '重包后可再展开');
+    assert(t.chuteStateOf('c2') === 'open', '重包后可再展开');
     // 伞毁了：hasChute 为 false，toggle 只提示不动状态
-    t.chuteState && (t.chuteState === 'open') && t.toggleChute();   // cut
+    t.toggleChute();   // cut
     t.destroyed.add('c2');
     t.invalidateShipCache();
     assert(t.hasChute() === false, '伞毁后应无伞');
-    const before = t.chuteState;
+    const before = t.chuteStateOf('c2');
     t.toggleChute();
-    assert(t.chuteState === before, '无伞时状态不变');
+    assert(t.chuteStateOf('c2') === before, '无伞时状态不变');
     resetToGround();
 });
 
@@ -513,7 +513,7 @@ test('[降落伞] 展开后减速远强于收起（10km 高、下落 800px/s）'
         t.rocket.vy = 800;                                  // 朝星球下落
         t.rocket.landed = false;
         t.rocket.state = 'idle';
-        t.chuteState = deploy ? 'open' : 'packed';
+        t.chuteStates.c2 = deploy ? 'open' : 'packed';
         env.pumpFrames(30);                                 // 0.5 游戏秒
         return Math.hypot(t.rocket.vx, t.rocket.vy);
     };
@@ -746,7 +746,7 @@ test('[分级] 空格切断：下级沿船轴抛离、血量无损', () => {
     t.vessels.splice(1);
     t.resetInterp();
     const hpBefore = JSON.parse(JSON.stringify(t.partHP));
-    t.activateDecoupler();
+    t.activateNextStage();
     assert(t.vessels.length === 2, '应分成两级, got ' + t.vessels.length);
     assert(t.shipDef.parts.some(p => p.id === 's1') && !t.shipDef.parts.some(p => p.id === 's5'),
            '主船应是上面级（含控制舱）');
@@ -775,10 +775,10 @@ test('[分级] 多级串联：两次空格 → 三截', () => {
     ]});
     t.vessels.splice(1);
     t.resetInterp();
-    t.activateDecoupler();   // 先抛最下面一级（y 最大的分离器）
+    t.activateNextStage();   // 先抛最下面一级（y 最大的分离器）
     assert(t.vessels.length === 2, '第一级分离');
     assert(t.shipDef.parts.some(p => p.id === 'd1'), '上面的分离器应留在主船上等待下次分级');
-    t.activateDecoupler();   // 再抛中间级
+    t.activateNextStage();   // 再抛中间级
     assert(t.vessels.length === 3, '第二级分离');
     assert(t.shipDef.parts.length === 2, '主船只剩上面级');
     assert(t.severed.size === 0, 'severed 清空');
@@ -793,7 +793,7 @@ test('[分级] 侧挂分离器：切不断船体 → 整根脱离', () => {
     ]});
     t.vessels.splice(1);
     t.resetInterp();
-    t.activateDecoupler();
+    t.activateNextStage();
     assert(t.vessels.length === 2, '分离器应自成一小船');
     assert(t.shipDef.parts.length === 2, '主船不再含分离器');
     const det = t.vessels[1];
