@@ -512,14 +512,61 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
         // 质量/推力永远按「现在还活着的部件」实时算（shipInfo 有缓存，开销可忽略）。
         // 以前这里用页面加载时冻结的 DRY_MASS / FUEL_MASS / FULL_THRUST 三个 const：
         // 发动机烧毁、撞毁、随断船分离之后，飞船照样有满推力、质量也不变 —— 已废除。
-        function shipMass(fuel) {
-            const info = shipInfo();
-            return info.dryMass + info.fuelCap * Math.max(0, Math.min(1, fuel));
+        // ==================== 燃料按箱存储 ====================
+        // 每个燃料箱部件自带油量 p.fuel（0~容量）。发动机抽全船所有油箱
+        //（等比消耗，油门手感不变）；分离时各段带走自己格子里的油箱和油——
+        // 上面级没放油箱就没油烧（分级火箭的物理约束，与 KSP 一致）。
+        function tankFuel(p) {
+            return (p.fuel !== undefined) ? p.fuel : (PART_TYPES[p.type] ? PART_TYPES[p.type].fuel : 0);
+        }
+        function aliveTanks() {
+            return shipDef.parts.filter(p => p.type === 'tank' && !destroyed.has(p.id) && !severed.has(p.id));
+        }
+        function totalFuel() {
+            return aliveTanks().reduce((s, p) => s + tankFuel(p), 0);
+        }
+        function totalCap() {
+            return aliveTanks().reduce((s, p) => s + (PART_TYPES[p.type].fuel || 0), 0);
+        }
+        function totalRatio() {
+            const c = totalCap();
+            return c > 0 ? Math.max(0, Math.min(1, totalFuel() / c)) : 0;
+        }
+        // 等比抽取：所有油箱同比例下降（frac = 占总容量的比例）
+        function drainFuel(frac) {
+            for (const p of aliveTanks()) {
+                const t = PART_TYPES[p.type];
+                p.fuel = Math.max(0, tankFuel(p) - frac * t.fuel);
+            }
+        }
+        function setFuelRatio(r) {
+            for (const p of aliveTanks()) {
+                p.fuel = Math.max(0, Math.min(1, r)) * PART_TYPES[p.type].fuel;
+            }
+        }
+        function partsRatio(parts) {
+            let f = 0, c = 0;
+            for (const p of parts) {
+                const t = PART_TYPES[p.type];
+                if (!t || t.fuel <= 0) continue;
+                f += tankFuel(p); c += t.fuel;
+            }
+            return c > 0 ? f / c : 0;
+        }
+        function shipMass() {
+            let m = 0;
+            for (const p of shipDef.parts) {
+                if (destroyed.has(p.id) || severed.has(p.id)) continue;
+                const t = PART_TYPES[p.type];
+                if (!t) continue;
+                m += t.mass + tankFuel(p);
+            }
+            return m;
         }
 
         // 当前实际加速度（已经算上油门和质量）
-        function thrustAccel(fuel, throttle) {
-            const m = shipMass(fuel);
+        function thrustAccel(throttle) {
+            const m = shipMass();
             return m > 0 ? shipInfo().thrust * Math.max(0, Math.min(1, throttle)) / m : 0;
         }
 
@@ -1049,28 +1096,17 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             const t = PART_TYPES[p.type];
             if (!t) return;
 
-            // 燃料箱被炸 → 它装的那部分油也没了。
-            // 分母用「还活着的油箱总容量（含自己这箱）」：旧实现用 spec.fuelCap
-            // 不排除已炸油箱 —— 多箱船炸到最后会剩下对应箱子已不存在的幽灵燃料。
-            let aliveCap = t.fuel;
-            for (const q of v.def.parts) {
-                if (q.id !== p.id && !v.dead.has(q.id)) {
-                    const tq = PART_TYPES[q.type];
-                    if (tq) aliveCap += tq.fuel;
-                }
-            }
-            if (t.fuel > 0 && aliveCap > 0) {
-                const share = t.fuel / aliveCap;
-                const lost = v.fuel * share;   // 当前油量里属于这个箱子的部分
-                v.fuel = Math.max(0, v.fuel - lost);
-                if (v.isMain && lost > 0.001) {
+            // 燃料按箱存储：油箱被炸 = 它的油跟着箱子一起没了
+            // （按箱独立，旧版「全船共享一个燃料池 + 按份额扣油」的结构已废除）。
+            if (t.fuel > 0 && tankFuel(p) > 0) {
+                if (v.isMain) {
                     toastQueue.push({
                         title: '燃 料 损 失',
-                        name: `燃料箱炸了，掉了 ${Math.round(lost * 100)}% 油`,
-                        desc: `剩余燃料 ${Math.round(v.fuel * 100)}%`,
+                        name: `燃料箱炸了，损失 ${Math.round(tankFuel(p))} 单位油`,
+                        desc: '其余油箱的燃料不受影响',
                     });
+                    rocket.fuel = totalRatio();   // 镜像
                 }
-                if (v.fuel <= 0 && v.state === 'firing') v.state = 'idle';
             }
             // 碎片从「肇事船」的部件位置喷出：旧实现硬用主船的 SPEC/rocket，
             // 残骸烧毁/撞毁时碎片会凭空出现在玩家船身上。
@@ -1137,8 +1173,11 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             invalidateShipCache();
             const main = vessels.find(v => v.id === activeVesselId);
             if (main) { main.def = shipDef; main.spec = SPEC; }
-            // 满油落地
-            rocket.fuel = 1;
+            // 满油落地（pristine 的油箱本身是满的，这里显式归位）
+            for (const p of shipDef.parts) {
+                const t = PART_TYPES[p.type];
+                if (t && t.fuel > 0) p.fuel = t.fuel;
+            }
             lastComFuel = -1;
             rocket.throttle = 1;
             rocket.state = 'idle';
@@ -1173,6 +1212,10 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             destroyed = new Set();
             severed.clear();   // 新船没有已切断的分离器
             chuteStates = {};  // 新船的伞全部包好
+            for (const p of shipDef.parts) {
+                const t = PART_TYPES[p.type];
+                if (t && t.fuel > 0) p.fuel = t.fuel;   // 新船油箱满油
+            }
             partHP = initPartHP();
             partTemp = initPartTemp();
             invalidateShipCache();
@@ -1291,6 +1334,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 }
                 partTemp = initPartTemp();
                 chuteStates = d.chutes || {};   // 恢复各伞状态（缺省 packed）
+                rocket.fuel = totalRatio();
                 invalidateShipCache();
                 if (d.rocket && typeof d.rocket === 'object') Object.assign(rocket, d.rocket);
                 lastComFuel = -1;
@@ -1416,11 +1460,8 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                         rocket.x += oXm * Math.cos(am) - oYm * Math.sin(am);
                         rocket.y += oXm * Math.sin(am) + oYm * Math.cos(am);
                     }
-                    // 燃料容量变了：油量按「占新容量的比例」重新归一
-                    const newCap = g.reduce((s, p) => s + (PART_TYPES[p.type] ? PART_TYPES[p.type].fuel : 0), 0);
-                    const oldCap = SPEC.fuelCap || 1;
-                    rocket.fuel = Math.max(0, Math.min(1, rocket.fuel * oldCap / Math.max(1e-6, newCap)));
-                    lastComFuel = -1;
+                    // 燃料按箱存储：分离后各截带走自己格子里的油箱和油，
+                    // 无需重新归一（per-tank 模型天然正确）。
                     // 同步更新登记在 vessels 里的主船记录
                     for (const v of vessels) {
                         if (v.id === activeVesselId) {
@@ -1445,7 +1486,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 const a = (rocket.angle - 90) * Math.PI / 180;
                 const wx = originX + offX * Math.cos(a) - offY * Math.sin(a);
                 const wy = originY + offX * Math.sin(a) + offY * Math.cos(a);
-                const v = makeVessel(g, wx, wy, rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
+                const v = makeVessel(g, wx, wy, rocket.vx, rocket.vy, rocket.angle, partsRatio(g));
                 // 带伤分离：血量/温度从主船表按 id 切过去（旧实现满血复活）
                 for (const p of g) {
                     if (partHP[p.id] !== undefined) v.hp[p.id] = partHP[p.id];
@@ -1559,7 +1600,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             rocket.x = target.x; rocket.y = target.y;
             rocket.vx = target.vx; rocket.vy = target.vy;
             rocket.angle = target.angle;
-            rocket.fuel = target.fuel;
+            rocket.fuel = partsRatio(target.def.parts);   // 接管目标的燃料比
             rocket.throttle = target.throttle;
             rocket.state = target.state === 'firing' ? 'idle' : target.state;
             rocket.landed = target.landed;
@@ -1649,6 +1690,13 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 detachSeveredParts();              // 没切断任何东西 → 侧挂/末端分离器整根脱离
             }
             unlock('first_staging');
+            if (vessels.length > before && hasWorkingEngine() && totalCap() === 0) {
+                toastQueue.push({
+                    title: '警 告',
+                    name: '上面级没有燃料箱',
+                    desc: '分离后发动机无法点火——上面级需要自己的油箱',
+                });
+            }
             const names = batch.map(a => a.kind === 'sever' ? '分离' : '开伞').join(' + ');
             toastQueue.push({
                 title: '激 活 分 级 ' + (stage + 1),
@@ -1663,7 +1711,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (loose.length === 0) return;
             shipDef.parts = shipDef.parts.filter(p => !severed.has(p.id));
             SPEC = shipSpec(shipDef);
-            const v = makeVessel(loose, rocket.x, rocket.y, rocket.vx, rocket.vy, rocket.angle, rocket.fuel);
+            const v = makeVessel(loose, rocket.x, rocket.y, rocket.vx, rocket.vy, rocket.angle, partsRatio(loose));
             v.def.name = '分离器';
             // 沿「部件相对船体质心的方向」弹开
             const P = PART_PX;
@@ -2187,13 +2235,19 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             if (shipAlive && (keys.refuel || keys.dump)) {
                 if (rocket.landed) {
                     if (keys.refuel) {
-                        rocket.fuel = Math.min(1, rocket.fuel + FUEL_FILL_RATE * inputDt);
-                        if (rocket.fuel >= 1) unlock('refuel_full');
+                        for (const p of aliveTanks()) {
+                            const t = PART_TYPES[p.type];
+                            p.fuel = Math.min(t.fuel, tankFuel(p) + FUEL_FILL_RATE * t.fuel * inputDt);
+                        }
+                        if (totalRatio() >= 0.999) unlock('refuel_full');
                     }
                     if (keys.dump) {
-                        const before = rocket.fuel;
-                        rocket.fuel = Math.max(0, rocket.fuel - FUEL_FILL_RATE * inputDt);
-                        stats.dumpedFuel += before - rocket.fuel;
+                        const before = totalFuel();
+                        for (const p of aliveTanks()) {
+                            const t = PART_TYPES[p.type];
+                            p.fuel = Math.max(0, tankFuel(p) - FUEL_FILL_RATE * t.fuel * inputDt);
+                        }
+                        stats.dumpedFuel += totalCap() > 0 ? (before - totalFuel()) / totalCap() : 0;
                         if (stats.dumpedFuel >= 0.5) unlock('dump_half');
                     }
                     fuelMsgTimer = 0;
@@ -2212,10 +2266,11 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 if (!hasWorkingEngine() || shipInfo().fuelCap <= 0) {
                     // 发动机已烧毁/撞毁/随断船分离，或油箱全毁：想飞也飞不起来
                     rocket.state = 'idle';
-                } else if (rocket.fuel > 0) {
+                } else if (totalFuel() > 0) {
                     thrusting = true;
-                    rocket.fuel = Math.max(0, rocket.fuel - rocket.throttle * dt / FUEL_BURN_SECONDS);
-                    if (rocket.fuel <= 0) {
+                    drainFuel(rocket.throttle * dt / FUEL_BURN_SECONDS);
+                    rocket.fuel = totalRatio();   // 兼容镜像（HUD/上报/测试读这个）
+                    if (totalFuel() <= 0.0001) {
                         rocket.state = 'idle';                          // 没油了，熄火
                         if (!rocket.landed) unlock('out_of_fuel');      // 在天上烧干 = 弹尽粮绝
                     }
@@ -2228,7 +2283,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                 // 推力沿着“船头”方向 (-cos, -sin)，大小 = 满油推力 × 油门 ÷ 当前质量。
                 // 油烧掉一半，飞船就轻了，同样油门能推得更猛 —— 这就是“燃料减少重量也减少”。
                 const a = rocket.angle * Math.PI / 180;
-                const power = thrustAccel(rocket.fuel, rocket.throttle);
+                const power = thrustAccel(rocket.throttle);
                 rocket.vx += -Math.cos(a) * power * dt;
                 rocket.vy += -Math.sin(a) * power * dt;
             }
@@ -2441,9 +2496,9 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
 
             // 质心随燃料变化：油烧掉，重心会往船头偏（真实火箭也是这样）。
             // 只在燃料真变了时重算 —— 100x 滑行时这里每帧要白跑 260 次。
-            if (rocket.fuel !== lastComFuel) {
-                SPEC.com = shipCenterOfMass(shipDef, SPEC, rocket.fuel);
-                lastComFuel = rocket.fuel;
+            if (totalFuel() !== lastComFuel) {
+                SPEC.com = shipCenterOfMass(shipDef, SPEC, q => tankFuel(q));
+                lastComFuel = totalFuel();
             }
 
             // 失控的航天器（惯性飞行，不能操控）
@@ -3076,25 +3131,25 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             throttleText.innerText = '油门 ' + Math.round(rocket.throttle * 100) + '%';
 
             // 燃料条（右边那根）：快没油的时候变红
-            fuelFill.style.height = (rocket.fuel * 100).toFixed(1) + '%';
-            fuelFill.style.background = rocket.fuel < 0.2
+            fuelFill.style.height = (totalRatio() * 100).toFixed(1) + '%';
+            fuelFill.style.background = totalRatio() < 0.2
                 ? 'linear-gradient(#ff7777, #cc2222)'
                 : 'linear-gradient(#66ddff, #2288cc)';
             let fuelLine2 = '';
             if (fuelMsgTimer > 0) fuelLine2 = '要先降落到星球上才能加油 / 卸油';
             else if (rocket.landed) fuelLine2 = '+ 补充 / - 卸掉';
             // 质量随燃料变化 —— 让“飞船变轻”看得见
-            const massNow = shipMass(rocket.fuel);
+            const massNow = shipMass();
             // 推重比 = 当前推力加速度 ÷ 地面引力加速度。
             // 分子是像素制加速度，分母也必须是像素制引力 —— 两边同一口径。
             // （以前分母用 planet.surfaceGravity=19.6，算是算出了 0.09:1，
             //   显示「推不起来」，可实际物理余量是 88 倍，把人吓一跳。）
-            const twrNow = thrustAccel(rocket.fuel, 1) / G0_PX;
+            const twrNow = thrustAccel(1) / G0_PX;
             const massInfo = shipInfo();
             const massTip = `质量 ${massNow.toFixed(0)}（空船 ${massInfo.dryMass}）· 推重比 ${twrNow.toFixed(2)}:1`
-                + (rocket.fuel < 0.999 ? `  已减重 ${(massInfo.fuelCap * (1 - rocket.fuel)).toFixed(0)}` : '');
+                + (totalRatio() < 0.999 ? `  已减重 ${(totalCap() - totalFuel()).toFixed(0)}` : '');
             fuelText.innerText =
-                `燃料 ${Math.round(rocket.fuel * 100)}% · 满油门还能烧 ${Math.round(rocket.fuel * FUEL_BURN_SECONDS)} 秒`
+                `燃料 ${Math.round(totalRatio() * 100)}% · 满油门还能烧 ${Math.round(totalRatio() * FUEL_BURN_SECONDS)} 秒`
                 + '\n' + massTip
                 + (fuelLine2 ? '\n' + fuelLine2 : '');
 
@@ -3349,6 +3404,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
                     camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom));
                     resetInterp();   // 读档是传送：插值状态归位
                     chuteStates = {};   // 读档的船伞全部重新包好
+                    setFuelRatio(rocket.fuel);   // 旧档的燃料比作用到各油箱
                     alert('读档成功！');
                 })
                 .catch(err => {
@@ -3394,7 +3450,7 @@ import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
             toggleChute, hasChute, shipTiltDeg, sanitizeShipDef, activateVessel, cycleVessel, vesselHasCapsule,
             archiveCurrentShip, activateNextStage, computeStageActions, stagePending,
             get severed() { return severed; },
-            chuteStateOf, aliveChutes,
+            chuteStateOf, aliveChutes, totalFuel, totalCap, totalRatio,
             get chuteStates() { return chuteStates; },
             get chuteDragNow() { return chuteDragNow; },
             resetToasts,   // 测试用：清掉正在显示 + 排队中的全部横幅

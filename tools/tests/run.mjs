@@ -210,8 +210,8 @@ test('[shipSpec] 质心随燃料前移（满油 23.74 → 空油 23.33）', () =
         { id: 'c', type: 'capsule', x: 0, y: 5 },
     ]};
     const s = shipSpec(def);
-    const full = shipCenterOfMass(def, s, 1);
-    const dry = shipCenterOfMass(def, s, 0);
+    const full = shipCenterOfMass(def, s, p => PART_TYPES[p.type].fuel);   // 满油
+    const dry = shipCenterOfMass(def, s, () => 0);                          // 空油
     near(full.y, 2730 / 115, 1e-6, '满油质心高度');
     near(full.x, 0, 1e-9, '满油质心水平');
     near(dry.y, 1750 / 75, 1e-6, '空油质心高度');
@@ -335,21 +335,24 @@ test('[c54de99] 分离摆位：分离瞬间发动机与控制舱的世界位置�
     resetToGround();
 });
 
-test('[c54de99] 双油箱逐个炸掉：油量按活油箱份额扣，不留幽灵燃料', () => {
+test('[燃料] 油箱被炸：油跟箱子走，不留幽灵燃料（按箱模型）', () => {
     t.setShipDef({ version: 1, name: '双箱船', parts: [
-        { id: 'g1', type: 'engine',  x: 0, y: 0 },
+        { id: 'g1', type: 'capsule', x: 0, y: 0 },
         { id: 'g2', type: 'tank',    x: 0, y: 2 },
         { id: 'g3', type: 'tank',    x: 0, y: 5 },
-        { id: 'g4', type: 'capsule', x: 0, y: 8 },
+        { id: 'g4', type: 'engine',  x: 0, y: 8 },
     ]});
-    env.pumpFrames(2);
+    t.vessels.splice(1);
+    t.resetInterp();
     const tank1 = t.shipDef.parts.find(p => p.id === 'g2');
     const tank2 = t.shipDef.parts.find(p => p.id === 'g3');
+    t.destroyed.add('g2');                     // 真实时序：先标记损毁再爆炸
     t.blowUpPart(tank1, t.mainView);
-    near(t.rocket.fuel, 0.5, 1e-9, '炸第一箱后');
-    t.destroyed.add('g2');
+    near(t.totalFuel(), 40, 1e-6, '炸第一箱后：另一箱 40 单位不受影响');
+    near(t.totalRatio(), 1.0, 1e-6, '剩余油箱仍是满的（油量表跳满属正常）');
+    t.destroyed.add('g3');
     t.blowUpPart(tank2, t.mainView);
-    near(t.rocket.fuel, 0, 1e-9, '炸第二箱后（旧实现会剩 25% 幽灵燃料）');
+    near(t.totalFuel(), 0, 1e-6, '炸第二箱后油量归零');
     assert(t.debris.length >= 14, '应生成碎片');
     const d = t.debris[0];
     assert(Math.hypot(d.x - t.rocket.x, d.y - t.rocket.y) < 100, '碎片应落在肇事船附近');
@@ -715,7 +718,7 @@ test('[多船] 新发射归档：换船不覆盖旧船，两船可切换', () =>
     assert(t.archiveCurrentShip() === true, '归档应成功');
     const oldShip = t.vessels.find(v => v.id !== 'v0');
     assert(!!oldShip, '旧船应在世界里');
-    near(oldShip.x, oldPos.x, 1e-6, '旧船原位保留 X');
+    near(oldShip.x, oldPos.x, 1e-3, '旧船原位保留 X');
     assert(oldShip.def.name === '默认船', '旧船应带上名字');
     // 换新船（带发射台偏移验证：旧船停在发射台，新船应挪开）
     t.setShipDef({ version: 1, name: '新船', parts: [

@@ -34,9 +34,8 @@ export function shipSpec(def) {
 // 航天器应该绕自己的重心旋转，而不是绕控制舱、也不是绕船底。
 // 做法：每个部件的质量放在它自己的几何中心上，加权平均。
 //   燃料算在燃料箱里 —— 所以油烧掉后，重心会往船头方向偏。
-export function shipCenterOfMass(def, spec, fuelRatio) {
+export function shipCenterOfMass(def, spec, fuelGet) {
     const P = PART_PX;
-    const fr = (typeof fuelRatio === 'number') ? fuelRatio : 1;   // 默认按满油算
     const cx = spec.centerX;
     const bottom = spec.box.maxY;
     let mx = 0, my = 0, total = 0;
@@ -44,8 +43,8 @@ export function shipCenterOfMass(def, spec, fuelRatio) {
     for (const p of def.parts) {
         const t = PART_TYPES[p.type];
         if (!t) continue;
-        // 部件质量：燃料箱里有多少油，就算多少燃料质量（质量随燃料减少）
-        const partFuel = t.fuel * fr;
+        // 部件质量：燃料箱按各自油量计（按箱独立，质量随燃料减少）
+        const partFuel = fuelGet ? fuelGet(p) : t.fuel;   // 缺省满油（规格估算用）
         const m = t.mass + partFuel;
         if (m <= 0) continue;
         // 部件几何中心（本地像素：x 以中轴为 0，y 以底面为 0、向上为负）
