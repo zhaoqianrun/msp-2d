@@ -5,61 +5,78 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MSP2D - 主菜单</title>
     <style>
+        /* ==================== 设计 tokens（与 play-main.html 同一套） ==================== */
+        :root {
+            --panel: rgba(10, 16, 28, .82);
+            --line: #2a3f5f;
+            --line-soft: rgba(42, 63, 95, .55);
+            --blue: #4a90d9;
+            --amber: #ffc35c;
+            --text: #dce8f7;
+            --dim: #6b86a6;
+            --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+            --sans: 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            --shadow: 0 2px 16px rgba(0, 0, 0, .35);
+        }
+        * { box-sizing: border-box; }
         body {
-            margin: 0;
-            background: radial-gradient(circle at center, #1a1a3a 0%, #000 100%);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            font-family: 'Segoe UI', sans-serif;
-            color: white;
-            overflow: hidden;
+            margin: 0; height: 100vh; overflow: hidden;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: #05070d; color: var(--text); font-family: var(--sans);
+            -webkit-tap-highlight-color: transparent;
         }
+        /* 极淡的坐标点阵，给黑底一点「任务控制台」的质感 */
+        body::before {
+            content: ''; position: fixed; inset: 0; pointer-events: none;
+            background-image: radial-gradient(rgba(124, 160, 205, .13) 1px, transparent 1.5px);
+            background-size: 30px 30px;
+        }
+        header { text-align: center; margin-bottom: 44px; position: relative; }
         h1 {
-            font-size: 80px;
-            letter-spacing: 10px;
-            text-shadow: 0 0 20px #4a90d9, 0 0 40px #4a90d9;
-            margin-bottom: 50px;
-            animation: pulse 3s infinite alternate;
+            margin: 0; font-size: 54px; font-weight: 600;
+            letter-spacing: 18px; padding-left: 18px;   /* 抵消最后一个字母的间距，保持视觉居中 */
+            color: var(--text);
         }
-        @keyframes pulse {
-            0% { opacity: 0.8; }
-            100% { opacity: 1; }
+        header .rule { width: 220px; height: 1px; background: var(--line); margin: 18px auto 0; }
+        .menu-row {
+            display: flex; flex-direction: column; gap: 12px; position: relative;
+            width: min(300px, calc(100vw - 40px));
         }
         .btn {
-            padding: 15px 50px;
-            font-size: 24px;
-            background: transparent;
-            color: #4a90d9;
-            border: 2px solid #4a90d9;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-decoration: none;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            color: var(--text); font-size: 16px; letter-spacing: 3px; text-decoration: none;
+            box-shadow: var(--shadow); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            transition: border-color .2s, background .2s;
         }
-        .btn:hover {
-            background: #4a90d9;
-            color: #fff;
-            box-shadow: 0 0 30px #4a90d9;
+        .btn::after {
+            content: ''; width: 7px; height: 7px; flex: none;
+            border-top: 1.5px solid var(--dim); border-right: 1.5px solid var(--dim);
+            transform: rotate(45deg);
         }
-        .menu-row { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+        .btn:hover { border-color: var(--blue); background: rgba(74, 144, 217, .1); }
+        .btn:hover::after { border-color: var(--blue); }
+        .btn:active { background: rgba(74, 144, 217, .18); }
         #ship-line {
-            margin-top: 26px; color: #6b86a6; font-size: 14px;
-            font-family: monospace; letter-spacing: 1px;
+            margin-top: 34px; color: var(--dim); font-size: 13px;
+            font-family: var(--mono); letter-spacing: 1px;
+            position: relative; text-align: center; padding: 0 20px;
         }
         #bgm-hint {
             position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
-            color: #4a6a8a; font-size: 13px; font-family: monospace;
-            letter-spacing: 1px; pointer-events: none;
+            color: var(--dim); font-size: 12px; font-family: var(--mono);
+            letter-spacing: 1px; pointer-events: none; opacity: .8; white-space: nowrap;
         }
     </style>
 </head>
 <body>
-    <h1>MSP-2D</h1>
+    <header>
+        <h1>MSP-2D</h1>
+        <div class="rule"></div>
+    </header>
     <div class="menu-row">
-        <a href="build.html" class="btn">造 船 厂</a>
+        <a href="build.html" class="btn">造 船 厂</a>
         <a href="station.html" class="btn">观 察 站</a>
         <a href="play-main.html" class="btn">开始游戏</a>
     </div>

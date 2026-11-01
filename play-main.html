@@ -5,281 +5,464 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MSP2D - 猫咪航天局</title>
     <style>
+        /* ==================== 设计 tokens ==================== */
+        :root {
+            --panel: rgba(10, 16, 28, .82);          /* 玻璃面板底 */
+            --panel-solid: rgba(8, 13, 24, .95);     /* 弹层（更实一点） */
+            --line: #2a3f5f;                         /* 1px 边框 */
+            --line-soft: rgba(42, 63, 95, .55);      /* 面板内分隔线 */
+            --blue: #4a90d9;
+            --amber: #ffc35c;
+            --red: #ff6a6a;
+            --green: #45c46e;
+            --text: #dce8f7;
+            --dim: #6b86a6;
+            --mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+            --sans: 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            --shadow: 0 2px 16px rgba(0, 0, 0, .35);
+        }
+        * { box-sizing: border-box; }
         html, body { height: 100%; }
-        /* 画布铺满整个窗口：宇宙必须填满屏幕，按钮和 HUD 浮在它上面，
-           而不是让宇宙缩在中间一小块、四周露出黑边。 */
-        body { margin: 0; background: #05070d; height: 100vh; overflow: hidden; position: relative; }
+        /* 画布铺满整个窗口：宇宙必须填满屏幕，按钮和 HUD 浮在它上面。 */
+        body { margin: 0; background: #05070d; height: 100vh; overflow: hidden; position: relative;
+               font-family: var(--sans); color-scheme: dark; }
         /* 画布自适应：手机上自动缩放到装得下，触控不要触发滚动/双指缩放 */
         canvas {
             position: absolute; top: 0; left: 0;
             width: 100%; height: 100%; display: block;
             border: none; touch-action: none;
         }
-        /* 左上角竖排容器：HUD 文字在上，部件栏自动排在它下面。
-           这样 HUD 换多少行，部件栏都会跟着往下让位，不会重叠。 */
-        #top-left {
-            position: absolute; top: 10px; left: 10px; right: 10px;
-            z-index: 3; pointer-events: none;
-            display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
-        }
-        #hud {
-            color: #0f0;
-            font-family: monospace; font-size: 14px; pointer-events: none;
-            text-shadow: 1px 1px 2px #000; white-space: pre;
-            /* 右边给按钮条留位置；窄屏时 100vw-740px 会变负数，用 260px 兜底 */
-            max-width: max(260px, calc(100vw - 740px));
-            overflow: hidden;
-        }
-        /* 顶部中间：本航天器的部件清单 */
-        /* 时间加速按钮：并进右上角的按钮条，不单独定位 */
-        #time-btn {
-            display: flex; align-items: center; gap: 2px;
-            font-family: monospace; font-size: 13px;
-        }
-        #time-btn button {
-            background: #333; color: #fff;
-            border: 1px solid #666; border-radius: 4px; cursor: pointer;
-            font-family: monospace; font-size: 13px;
-            padding: 8px 11px; min-width: 34px;
-            -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
-        }
-        #time-btn button:hover { background: #444; }
-        #time-btn button:active { background: #555; }
-        #time-btn #time-value {
-            background: #241a08; color: #ffc35c;
-            border: 1px solid #6a5020; border-radius: 4px;
-            padding: 8px 10px; min-width: 54px; text-align: center;
-            font-weight: bold; margin: 0 4px;
-        }
-        #time-btn #time-value.fast { color: #ff9d5c; border-color: #7a4a18; }
-        #time-btn #time-value.ultra { color: #ff6a6a; border-color: #7a2828;
-                                      animation: pulse 0.9s ease-in-out infinite; }
 
-        /* 顶部部件栏。
-           之前放在第一行中间，宽屏时会一直伸到右边，
-           把右上角的时间按钮和存档按钮盖住（试过限宽，但按钮条本身
-           就占 700+ px，怎么限都会重叠）。
-           现在**挪到第二行**，横跨整个宽度：
-             第一行 = HUD 文字（左） + 功能按钮条（右）
-             第二行 = 部件清单
-           两行之间不会再抢位置。 */
+        /* ==================== 左上：飞行数据面板 + 部件栏 ==================== */
+        #top-left {
+            position: absolute; top: 10px; left: 10px;
+            z-index: 5; pointer-events: none;
+            display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+        }
+        #hud-panel {
+            width: min(348px, calc(100vw - 20px));
+            background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            box-shadow: var(--shadow); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            padding: 12px 14px;
+        }
+        /* 观战端等待消息（js/main.js 会写 innerText；平时为空整行隐藏） */
+        #hud {
+            font-family: var(--mono); font-size: 12px; color: var(--amber);
+            padding-bottom: 8px; margin-bottom: 8px;
+            border-bottom: 1px solid var(--line-soft);
+        }
+        #hud:empty { display: none; }
+        /* 第一层：速度 / 高度 —— 大号数字，小号标签 */
+        .hud-primary { display: flex; gap: 30px; }
+        .metric .lab {
+            display: block; font-size: 10px; letter-spacing: 2px;
+            color: var(--dim); margin-bottom: 2px;
+        }
+        .metric .val {
+            font-family: var(--mono); font-size: 24px; font-weight: 600;
+            color: var(--text); line-height: 1.1; white-space: nowrap;
+        }
+        /* 第二层：状态 / 油门 / 燃料 —— 一行小状态 */
+        .hud-state {
+            display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+            margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line-soft);
+        }
+        .hud-cell { display: inline-flex; align-items: baseline; gap: 5px; }
+        .hud-cell .lab { font-size: 10px; letter-spacing: 1px; color: var(--dim); }
+        .hud-cell .val { font-family: var(--mono); font-size: 13px; color: var(--text); }
+        #hud-thr { color: var(--amber); }
+        #hud-fuel { color: #7fb8e8; }
+        #hud-status { font-size: 12px; color: var(--text);
+                      display: inline-flex; align-items: center; gap: 6px; }
+        #hud-status::before {
+            content: ''; width: 6px; height: 6px; border-radius: 50%;
+            background: var(--blue); flex: none;
+        }
+        #hud-status.landed { color: var(--green); }
+        #hud-status.landed::before { background: var(--green); }
+        #hud-status.firing { color: var(--amber); }
+        #hud-status.firing::before { background: var(--amber); }
+        /* 第三层：轨道 / 大气 / 飞船 / 统计 / 协同 —— 小字 */
+        .hud-subs { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+        .hud-sub {
+            font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+            color: var(--dim);
+        }
+        .hud-sub .val { font-family: var(--mono); }
+
+        /* ==================== 部件栏 ==================== */
+        /* 跟在数据面板下面；chips 由 js/main.js 生成（class 名固定） */
         #parts-bar {
-            align-self: stretch;   /* 撑满容器宽度（左右各留 10px），排到 HUD 下方 */
             pointer-events: none; white-space: nowrap;
-            display: flex; align-items: center; gap: 6px;
-            font-family: monospace; font-size: 12px;
-            background: rgba(4, 10, 18, 0.72);
-            border: 1px solid #1e3050; border-radius: 8px;
-            padding: 5px 10px;
-            overflow-x: auto;
-            scrollbar-width: none;
+            width: max-content; max-width: min(720px, calc(100vw - 20px));
+            display: flex; align-items: center; gap: 5px;
+            font-family: var(--sans); font-size: 12px;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            box-shadow: var(--shadow); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            padding: 6px 10px;
+            overflow-x: auto; scrollbar-width: none;
         }
         #parts-bar::-webkit-scrollbar { display: none; }
-        /* 部件栏现在在竖排容器里，靠 flex 自动排到 HUD 下面，
-           不再需要按屏幕宽度手动调 top（旧写法会和 HUD 叠在一起）。 */
         #parts-bar .p {
-            display: inline-flex; align-items: center; gap: 4px;
-            padding: 2px 7px; border-radius: 6px;
-            border: 1px solid; line-height: 1.5;
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 2px 8px; border-radius: 5px;
+            border: 1px solid; line-height: 1.5; font-size: 11.5px;
         }
-        #parts-bar .p .dot {
-            width: 7px; height: 7px; border-radius: 50%;
-        }
-        #parts-bar .p .hp {
-            font-size: 10px; opacity: 0.75;
-        }
+        #parts-bar .p .dot { width: 7px; height: 7px; border-radius: 50%; }
+        #parts-bar .p .hp { font-family: var(--mono); font-size: 10px; opacity: .75; }
         /* 完好 */
-        #parts-bar .ok { color: #9fe0b0; border-color: #245c38; background: #0a1f12; }
-        #parts-bar .ok .dot { background: #45c46e; }
+        #parts-bar .ok { color: #9fd8ae; border-color: rgba(69, 196, 110, .45); background: rgba(69, 196, 110, .08); }
+        #parts-bar .ok .dot { background: var(--green); }
         /* 受损 */
-        #parts-bar .hurt { color: #ffd479; border-color: #6b5320; background: #221a08; }
+        #parts-bar .hurt { color: var(--amber); border-color: rgba(255, 195, 92, .45); background: rgba(255, 195, 92, .07); }
         #parts-bar .hurt .dot { background: #e0a020; }
         /* 正在烧 */
-        #parts-bar .hot { color: #ffb37a; border-color: #7a3f18; background: #26120a;
-                          animation: pulse 0.7s ease-in-out infinite; }
+        #parts-bar .hot { color: #ffb37a; border-color: rgba(255, 106, 26, .5); background: rgba(255, 106, 26, .08);
+                          animation: pulse .7s ease-in-out infinite; }
         #parts-bar .hot .dot { background: #ff6a1a; }
         /* 已毁 */
-        #parts-bar .gone { color: #6a5560; border-color: #3a2a30; background: #160f12;
-                           text-decoration: line-through; opacity: 0.7; }
+        #parts-bar .gone { color: #5d5560; border-color: rgba(93, 85, 96, .5); background: rgba(93, 85, 96, .1);
+                           text-decoration: line-through; opacity: .75; }
         #parts-bar .gone .dot { background: #4a3a40; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
         #parts-bar .summary {
-            color: #8fb4dc; padding-left: 6px; margin-left: 2px;
-            border-left: 1px solid #24395a;
+            color: #8fb4dc; padding-left: 8px; margin-left: 2px;
+            border-left: 1px solid var(--line-soft);
         }
-        #parts-bar .warn { color: #ff8f8f; font-weight: bold; }
-        @media (max-width: 760px) {
-            #parts-bar { font-size: 10px; padding: 4px 6px; gap: 4px; }
-            #parts-bar .p { padding: 1px 4px; }
-            #parts-bar .p .hp { display: none; }
-        }
-        #controls {
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            color: #fff; font-family: monospace; background: rgba(0,0,0,0.7);
-            padding: 10px 20px; border-radius: 8px; border: 1px solid #444;
-            font-size: 13px; pointer-events: none;
-        }
-        /* 右上角按钮改成一行 flex，窄屏会自动换行 */
+        #parts-bar .warn { color: var(--red); font-weight: 600; }
+
+        /* ==================== 右上：时间倍率胶囊 + 系统按钮 ==================== */
         #top-buttons {
-            position: absolute; top: 10px; right: 10px;
-            display: flex; gap: 8px; flex-wrap: wrap;
-            justify-content: flex-end; max-width: 72%;
+            position: absolute; top: 10px; right: 10px; z-index: 6;
+            display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+            pointer-events: none;
         }
-        .btn-save {
-            padding: 8px 15px; background: #333; color: #fff;
-            border: 1px solid #666; border-radius: 4px; cursor: pointer;
-            font-family: monospace; font-size: 13px;
-            -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
+        #top-buttons > * { pointer-events: auto; }
+        /* 时间倍率：独立胶囊（− / 档位 / +） */
+        #time-btn {
+            display: flex; align-items: center; gap: 2px;
+            padding: 3px; background: var(--panel); border: 1px solid var(--line);
+            border-radius: 999px; box-shadow: var(--shadow);
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
         }
-        .btn-save:hover { background: #555; }
-        /* 节流阀（油门）条 */
-        #throttle-bar {
-            position: absolute; left: 14px; bottom: 200px;
-            width: 20px; height: 170px;
-            background: rgba(255,255,255,0.10);
-            border: 1px solid #555; border-radius: 4px; overflow: hidden;
+        #time-btn button {
+            width: 30px; height: 28px; border: none; background: transparent;
+            color: var(--dim); font-size: 15px; font-family: var(--mono);
+            border-radius: 999px; cursor: pointer;
+            -webkit-tap-highlight-color: transparent; touch-action: manipulation;
         }
+        #time-btn button:hover { background: rgba(74, 144, 217, .18); color: var(--text); }
+        #time-btn button:active { background: rgba(74, 144, 217, .3); }
+        #time-value {
+            min-width: 56px; text-align: center; padding: 5px 0;
+            font-family: var(--mono); font-size: 13px; font-weight: 600;
+            color: var(--text); background: rgba(74, 144, 217, .12);
+            border: 1px solid var(--line); border-radius: 999px;
+        }
+        /* 加速档位提示：fast = 中速档，ultra = 极速档 */
+        #time-value.fast { color: var(--amber); border-color: rgba(255, 195, 92, .45); background: rgba(255, 195, 92, .1); }
+        #time-value.ultra { color: var(--red); border-color: rgba(255, 106, 106, .5); background: rgba(255, 106, 106, .1);
+                            animation: pulse .9s ease-in-out infinite; }
+        /* 系统按钮：一行紧凑图标 + 文字 */
+        .sys-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 72vw; }
+        .sys-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 11px; background: var(--panel); border: 1px solid var(--line);
+            border-radius: 8px; color: var(--text); font-family: var(--sans); font-size: 12px;
+            cursor: pointer; box-shadow: var(--shadow);
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+        }
+        .sys-btn svg {
+            width: 13px; height: 13px; flex: none;
+            stroke: var(--dim); fill: none; stroke-width: 1.8;
+            stroke-linecap: round; stroke-linejoin: round;
+        }
+        .sys-btn:hover { border-color: var(--blue); }
+        .sys-btn:hover svg { stroke: var(--blue); }
+        .sys-btn:active { background: rgba(74, 144, 217, .15); }
+
+        /* ==================== 左右：油门 / 燃料 竖条 ==================== */
+        #throttle-bar, #fuel-bar {
+            position: absolute; bottom: 208px; width: 18px; height: 172px; z-index: 4;
+            background: rgba(10, 16, 28, .55);
+            border: 1px solid var(--line); border-radius: 7px; overflow: hidden;
+        }
+        #throttle-bar { left: 16px; }
+        #fuel-bar { right: 16px; }
+        /* 刻度线（每 1/4 一格），盖在填充上面 */
+        #throttle-bar::after, #fuel-bar::after {
+            content: ''; position: absolute; inset: 0; pointer-events: none;
+            background: repeating-linear-gradient(to top,
+                transparent 0 42px, rgba(220, 232, 247, .16) 42px 43px);
+        }
+        /* 填充高度/颜色由 js/main.js 直接写内联样式，这里只给默认色 */
         #throttle-fill {
             position: absolute; left: 0; bottom: 0; width: 100%; height: 100%;
-            background: linear-gradient(#ffcc55, #ff8800);
-        }
-        #throttle-text {
-            position: absolute; left: 14px; bottom: 376px; width: 220px;
-            color: #ffcc55; font-family: monospace; font-size: 13px;
-            text-shadow: 1px 1px 2px #000;
-        }
-        /* 燃料条（最右边那根） */
-        #fuel-bar {
-            position: absolute; right: 14px; bottom: 200px;
-            width: 20px; height: 170px;
-            background: rgba(255,255,255,0.10);
-            border: 1px solid #555; border-radius: 4px; overflow: hidden;
+            background: var(--amber); opacity: .9;
         }
         #fuel-fill {
             position: absolute; left: 0; bottom: 0; width: 100%; height: 100%;
-            background: linear-gradient(#66ddff, #2288cc);
+            background: var(--blue); opacity: .9;
+        }
+        #throttle-text {
+            position: absolute; left: 16px; bottom: 388px;
+            color: var(--amber); font-family: var(--mono); font-size: 12px;
         }
         #fuel-text {
-            position: absolute; right: 14px; bottom: 376px; width: 260px;
-            color: #66ddff; font-family: monospace; font-size: 13px;
-            text-align: right; white-space: pre-line;
-            text-shadow: 1px 1px 2px #000;
+            position: absolute; right: 16px; bottom: 388px; width: 300px;
+            color: #7fb8e8; font-family: var(--mono); font-size: 12px;
+            text-align: right; white-space: pre-line; line-height: 1.6;
         }
-        /* 成就达成：上方中间弹出的横幅 */
+
+        /* ==================== 成就横幅 + 成就面板 ==================== */
         #achievement {
             position: absolute; top: 22px; left: 50%;
             transform: translateX(-50%) translateY(-24px);
-            padding: 12px 30px; text-align: center; pointer-events: none;
-            background: rgba(10, 20, 40, 0.92);
-            border: 1px solid #4a90d9; border-radius: 10px;
-            box-shadow: 0 0 26px rgba(74, 144, 217, 0.55);
+            padding: 10px 34px 12px; text-align: center; pointer-events: none;
+            background: var(--panel-solid); border: 1px solid var(--line);
+            border-top: 2px solid var(--amber); border-radius: 8px;
+            box-shadow: var(--shadow);
             opacity: 0; transition: opacity .35s, transform .35s;
-            font-family: monospace; white-space: nowrap; z-index: 10;
+            white-space: nowrap; z-index: 10;
         }
-        #achievement-title { color: #4a90d9; font-size: 12px; letter-spacing: 5px; }
-        #achievement-name { color: #fff; font-size: 22px; letter-spacing: 2px; margin-top: 3px; }
-        #achievement-desc { color: #9cc4e8; font-size: 13px; margin-top: 5px; }
-        /* 成就列表（按 C 打开 / 关闭） */
+        #achievement-title { color: var(--amber); font-size: 11px; letter-spacing: 6px; }
+        #achievement-name { color: var(--text); font-size: 21px; font-weight: 600; letter-spacing: 2px; margin-top: 4px; }
+        #achievement-desc { color: var(--dim); font-size: 12.5px; margin-top: 4px; }
         #achievement-panel {
             display: none; position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            width: 640px; max-height: 80%; overflow-y: auto;
-            padding: 16px 22px;
-            background: rgba(6, 12, 24, 0.95);
-            border: 1px solid #35506e; border-radius: 10px;
-            font-family: monospace; z-index: 11;
+            width: min(640px, 94vw); max-height: 80%; overflow-y: auto;
+            padding: 16px 22px; z-index: 11;
+            background: var(--panel-solid); border: 1px solid var(--line); border-radius: 10px;
+            box-shadow: var(--shadow); pointer-events: auto;
         }
-        .ach-head { color: #4a90d9; font-size: 15px; letter-spacing: 2px; margin-bottom: 10px; text-align: center; }
-        .ach-row { display: flex; font-size: 13px; padding: 3px 0; }
-        .ach-mark { width: 22px; }
-        .ach-name { width: 116px; }
-        .ach-desc { flex: 1; }
-        .ach-row.got { color: #7fe0a8; }
-        .ach-row.locked { color: #46586c; }
-        /* ==================== 触控按键（手机自动显示，桌面按 T 或点"触控"也能开） ==================== */
-        #touch-controls { position: absolute; inset: 0; pointer-events: none; display: none; }
+        .ach-head {
+            color: var(--blue); font-size: 14px; letter-spacing: 3px;
+            margin-bottom: 10px; padding-bottom: 10px; text-align: center;
+            border-bottom: 1px solid var(--line-soft);
+        }
+        .ach-row {
+            display: flex; align-items: baseline; font-size: 13px;
+            padding: 7px 2px; border-bottom: 1px solid rgba(42, 63, 95, .35);
+        }
+        .ach-row:last-child { border-bottom: none; }
+        .ach-mark { width: 24px; flex: none; font-family: var(--mono); font-size: 11px; }
+        .ach-name { width: 120px; flex: none; color: var(--text); }
+        .ach-desc { flex: 1; color: var(--dim); }
+        .ach-row.got .ach-mark { color: var(--green); }
+        .ach-row.got .ach-desc { color: #9db4d0; }
+        .ach-row.locked { color: #51637a; }
+        .ach-row.locked .ach-name { color: #51637a; }
+
+        /* ==================== 观战角标 ==================== */
+        #spectator-badge {
+            display: none; position: absolute; top: 50%; left: 20px;
+            transform: translateY(-50%); z-index: 6;
+            padding: 14px 7px; background: var(--panel);
+            border: 1px solid rgba(255, 195, 92, .4); border-radius: 8px;
+            box-shadow: var(--shadow); pointer-events: none;
+            color: var(--amber); font-size: 13px; letter-spacing: 6px;
+            writing-mode: vertical-rl;
+        }
+
+        /* ==================== 键位帮助（右下角 ? 展开，纯 CSS） ==================== */
+        #controls-toggle { position: absolute; opacity: 0; pointer-events: none; }
+        #controls-fab {
+            position: absolute; right: 208px; bottom: 16px; z-index: 9;
+            width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 50%;
+            box-shadow: var(--shadow); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            color: var(--dim); font-size: 15px; cursor: pointer; user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #controls-fab:hover { color: var(--text); border-color: var(--blue); }
+        #controls {
+            position: absolute; right: 208px; bottom: 56px; z-index: 9;
+            display: none; width: 336px; max-width: calc(100vw - 24px);
+            padding: 14px 16px;
+            background: var(--panel-solid); border: 1px solid var(--line); border-radius: 10px;
+            box-shadow: var(--shadow); pointer-events: auto;
+        }
+        #controls-toggle:checked ~ #controls-fab { color: var(--text); border-color: var(--blue); background: rgba(74, 144, 217, .2); }
+        #controls-toggle:checked ~ #controls { display: block; }
+        #controls ul {
+            list-style: none; margin: 0; padding: 0;
+            display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px;
+        }
+        #controls li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9db4d0; white-space: nowrap; }
+        #controls li.span2 { grid-column: 1 / -1; }
+        #controls kbd {
+            font-family: var(--mono); font-size: 11px; color: var(--text);
+            background: rgba(74, 144, 217, .12); border: 1px solid var(--line);
+            border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; flex: none;
+        }
+        #controls .ctl-note {
+            margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft);
+            display: flex; align-items: center; gap: 8px;
+            font-size: 11.5px; color: var(--dim); font-family: var(--mono);
+        }
+        #controls .ctl-note .dash { display: inline-block; width: 22px; border-top: 2px dashed var(--blue); }
+
+        /* ==================== 触控按键（结构/位置固定，只换皮） ==================== */
+        #touch-controls { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 8; }
         #touch-controls .pad { position: absolute; display: flex; gap: 8px; flex-wrap: wrap; width: 184px; }
         #touch-controls .pad-left { left: 12px; bottom: 12px; }
         #touch-controls .pad-right { right: 12px; bottom: 12px; justify-content: flex-end; }
         .tbtn {
             pointer-events: auto; touch-action: none;
-            min-width: 86px; padding: 16px 14px;
-            font-family: monospace; font-size: 15px; color: #cfe6ff;
-            background: rgba(20, 34, 56, 0.62);
-            border: 1px solid #4a6f9a; border-radius: 12px;
+            min-width: 86px; padding: 15px 14px;
+            font-family: var(--sans); font-size: 14px; color: var(--text);
+            background: rgba(13, 22, 38, .78);
+            border: 1px solid var(--line); border-radius: 10px;
+            box-shadow: var(--shadow); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
             -webkit-tap-highlight-color: transparent;
             user-select: none; cursor: pointer;
         }
-        .tbtn.small { min-width: 54px; padding: 9px 6px; font-size: 12px; }
+        .tbtn.small { min-width: 54px; padding: 9px 7px; font-size: 12px; color: var(--dim); }
         .tbtn.wide { flex: 1 1 100%; min-width: 0; }
-        .tbtn.active { background: rgba(74, 144, 217, 0.85); color: #fff; }
+        .tbtn.active { background: rgba(74, 144, 217, .9); border-color: #6ba6e0; color: #fff; }
         #t-ignite {
-            padding: 18px 10px; font-size: 17px;
-            border-radius: 14px; border-color: #d08a2a; color: #ffd48a;
-            background: rgba(60, 36, 8, 0.72);
+            padding: 17px 10px; font-size: 16px;
+            border-color: rgba(255, 195, 92, .5); color: var(--amber);
+            background: rgba(46, 32, 10, .8);
         }
-        #t-ignite.active { background: rgba(255, 170, 0, 0.9); color: #241400; }
-        /* 屏幕矮的时候（横屏手机）把东西都缩小一点 */
-        @media (max-height: 620px) {
-            #hud { font-size: 11px; }
-            #throttle-bar, #fuel-bar { height: 88px; bottom: 150px; }
-            #throttle-text, #fuel-text { font-size: 11px; bottom: 244px; }
-            .tbtn { min-width: 68px; padding: 11px 8px; font-size: 13px; }
-            .tbtn.small { min-width: 48px; padding: 7px 4px; font-size: 11px; }
-            #t-ignite { padding: 13px 8px; font-size: 15px; }
+        #t-ignite.active { background: var(--amber); border-color: var(--amber); color: #241a04; }
+
+        /* ==================== 窄屏 / 矮屏 ==================== */
+        @media (max-width: 760px) {
+            /* 竖排按钮会占到 ~120px 高，数据面板往下让位 */
+            #top-left { top: 124px; }
+            .sys-btn { padding: 5px 9px; font-size: 11px; }
+            .metric .val { font-size: 20px; }
         }
-        /* 观战模式角标 */
-        #spectator-badge {
-            display: none; position: absolute; top: 50%; left: 22px;
-            transform: translateY(-50%);
-            color: #ffc35c; font-family: monospace; font-size: 15px;
-            letter-spacing: 4px; writing-mode: vertical-rl;
-            text-shadow: 0 0 12px rgba(255,195,92,.7); pointer-events: none;
-        }
-        /* 竖屏手机：按键再缩一圈，左右两排才不会打架 */
         @media (max-width: 460px) {
             #touch-controls .pad { width: 150px; gap: 6px; }
             .tbtn { min-width: 70px; padding: 11px 8px; font-size: 12px; }
             .tbtn.small { min-width: 44px; padding: 7px 3px; font-size: 11px; }
-            #top-buttons { max-width: 62%; gap: 6px; }
-            .btn-save { padding: 6px 10px; font-size: 12px; }
+            #t-ignite { padding: 13px 8px; font-size: 15px; }
+            .sys-row { max-width: calc(100vw - 20px); }
+            #controls-fab, #controls { right: 174px; }
+        }
+        /* 屏幕矮的时候（横屏手机）：面板压紧，油门/燃料条挪到底部中间两侧，
+           左右下角让给触控垫；键位帮助直接收起（触控用户用不到键盘） */
+        @media (max-height: 620px) {
+            #top-left { top: 96px; }
+            #hud-panel { width: min(320px, calc(100vw - 20px)); padding: 9px 12px; }
+            .metric .val { font-size: 18px; }
+            .hud-primary { gap: 22px; }
+            .hud-sub { font-size: 10.5px; line-height: 1.45; }
+            .sys-row { flex-wrap: nowrap; }
+            #throttle-bar { left: calc(50% - 48px); bottom: 14px; height: 120px; }
+            #fuel-bar { left: calc(50% + 28px); bottom: 14px; height: 120px; }
+            #throttle-bar::after, #fuel-bar::after {
+                background: repeating-linear-gradient(to top,
+                    transparent 0 29px, rgba(220, 232, 247, .16) 29px 30px);
+            }
+            #throttle-text { left: calc(50% - 120px); width: 112px; text-align: right; bottom: 142px; }
+            #fuel-text { left: calc(50% + 58px); right: auto; width: 260px; text-align: left; bottom: 142px; }
+            #controls-fab, #controls { display: none; }
+            .tbtn { min-width: 68px; padding: 11px 8px; font-size: 13px; }
+            .tbtn.small { min-width: 48px; padding: 7px 4px; font-size: 11px; }
+            #t-ignite { padding: 13px 8px; font-size: 15px; }
         }
     </style>
 </head>
 <body>
     <canvas id="game" width="1000" height="700"></canvas>
-    <!-- 左上角竖排：HUD 文字在上，部件栏自动排在它下面。
-         以前部件栏用写死的 top:50px，HUD 一换行就会压到一起。 -->
+
+    <!-- 左上：飞行数据（分层玻璃面板）+ 部件栏。
+         #hud 只承载观战端的「等待操控端连接...」消息（main.js 写 innerText），
+         平时为空自动隐藏；飞行数据由豁免块写进下面各子元素。 -->
     <div id="top-left">
-        <div id="hud"></div>
+        <div id="hud-panel">
+            <div id="hud"></div>
+            <div class="hud-primary">
+                <div class="metric">
+                    <span class="lab">速度</span>
+                    <span class="val" id="hud-speed"></span>
+                </div>
+                <div class="metric">
+                    <span class="lab">高度</span>
+                    <span class="val" id="hud-alt"></span>
+                </div>
+            </div>
+            <div class="hud-state">
+                <span class="hud-cell"><span class="lab">状态</span><span id="hud-status"></span></span>
+                <span class="hud-cell"><span class="lab">油门</span><span class="val" id="hud-thr"></span></span>
+                <span class="hud-cell"><span class="lab">燃料</span><span class="val" id="hud-fuel"></span></span>
+            </div>
+            <div class="hud-subs">
+                <div class="hud-sub">角度 <span class="val" id="hud-angle"></span> · 缩放 <span class="val" id="hud-zoom"></span></div>
+                <div class="hud-sub" id="hud-orbit"></div>
+                <div class="hud-sub" id="hud-orbit-v"></div>
+                <div class="hud-sub" id="hud-atmo"></div>
+                <div class="hud-sub" id="hud-ship"></div>
+                <div class="hud-sub" id="hud-stats"></div>
+                <div class="hud-sub" id="hud-coop"></div>
+            </div>
+        </div>
         <div id="parts-bar"></div>
     </div>
+
+    <!-- 左右竖条：填充由 JS 写内联样式，容器/刻度/边框在这里 -->
     <div id="throttle-bar"><div id="throttle-fill"></div></div>
     <div id="throttle-text">油门 100%</div>
     <div id="fuel-bar"><div id="fuel-fill"></div></div>
     <div id="fuel-text">燃料 100%</div>
+
+    <!-- 成就横幅（JS 设 opacity/transform）与成就列表 -->
     <div id="achievement">
         <div id="achievement-title">成 就 达 成</div>
         <div id="achievement-name"></div>
         <div id="achievement-desc"></div>
     </div>
     <div id="achievement-panel"></div>
+
+    <!-- 观战角标（竖排，JS 控制显示） -->
     <div id="spectator-badge">观 战 中</div>
-    <div id="controls">E 点火/关机　A D 旋转　↑↓ 油门(Shift 微调)　[ ] 缩放　+ 加油 / - 卸油(要着陆)　空格 分离　S 存档　L 读档　C 成就　M 音乐　|　蓝色虚线 = 预测轨道</div>
+
+    <!-- 键位说明：默认收起，点右下角 ? 展开（纯 CSS checkbox 方案，无 JS） -->
+    <input type="checkbox" id="controls-toggle">
+    <label id="controls-fab" for="controls-toggle">?</label>
+    <div id="controls">
+        <ul>
+            <li><kbd>E</kbd>点火/关机</li>
+            <li><kbd>A D</kbd>旋转</li>
+            <li><kbd>↑↓</kbd>油门(Shift 微调)</li>
+            <li><kbd>[ ]</kbd>缩放</li>
+            <li class="span2"><kbd>+</kbd>加油 / <kbd>-</kbd>卸油(要着陆)</li>
+            <li><kbd>空格</kbd>分离</li>
+            <li><kbd>S</kbd>存档</li>
+            <li><kbd>L</kbd>读档</li>
+            <li><kbd>C</kbd>成就</li>
+            <li><kbd>M</kbd>音乐</li>
+        </ul>
+        <div class="ctl-note"><i class="dash"></i>蓝色虚线 = 预测轨道</div>
+    </div>
+
+    <!-- 右上：时间倍率胶囊 + 系统按钮 -->
     <div id="top-buttons">
         <div id="time-btn">
             <button id="time-down" title="减速（,）">−</button>
             <div id="time-value">1x</div>
             <button id="time-up" title="加速（.）">+</button>
         </div>
-        <button class="btn-save" onclick="saveGame()">存档</button>
-        <button class="btn-save" onclick="loadGame()">读档</button>
-        <button class="btn-save" onclick="toggleAchievementPanel()">成就</button>
-        <button class="btn-save" onclick="toggleBgm()">音乐</button>
-        <button class="btn-save" onclick="showCoopInfo()">协同</button>
-        <button class="btn-save" onclick="toggleTouchPanel()">触控</button>
+        <div class="sys-row">
+            <button class="sys-btn" onclick="saveGame()">
+                <svg viewBox="0 0 24 24"><path d="M4 4h12l4 4v12H4z"/><path d="M8 4v5h7V4"/><rect x="8" y="13" width="8" height="7"/></svg>存档</button>
+            <button class="sys-btn" onclick="loadGame()">
+                <svg viewBox="0 0 24 24"><path d="M12 14V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v4h16v-4"/></svg>读档</button>
+            <button class="sys-btn" onclick="toggleAchievementPanel()">
+                <svg viewBox="0 0 24 24"><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 5H4a3 3 0 0 0 3 4"/><path d="M17 5h3a3 3 0 0 1-3 4"/><path d="M12 14v4"/><path d="M8 21h8"/></svg>成就</button>
+            <button class="sys-btn" onclick="toggleBgm()">
+                <svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="15" r="2.5"/></svg>音乐</button>
+            <button class="sys-btn" onclick="showCoopInfo()">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/></svg>协同</button>
+            <button class="sys-btn" onclick="toggleTouchPanel()">
+                <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18h2"/></svg>触控</button>
+        </div>
     </div>
 
     <!-- 触控按键：按下 = 按下对应的键，和键盘走同一套逻辑 -->
@@ -291,6 +474,7 @@
             <button class="tbtn small" id="t-vessel">切船</button>
             <button class="tbtn" id="t-left">◀ 左转</button>
             <button class="tbtn" id="t-right">右转 ▶</button>
+            <button class="tbtn wide" id="t-sep">分离</button>
         </div>
         <div class="pad pad-right">
             <button class="tbtn small" id="t-dump">卸油</button>
