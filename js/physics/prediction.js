@@ -35,7 +35,7 @@ export function predictPath(s, engineOn, now) {
     const dens = atmosphereDensity(s.x, s.y);
 
     // 真空 + 关机 + 束缚轨道 → 解析椭圆
-    if (!engineOn && dens < 0.01 && energy < 0) {
+    if (dens < 0.01 && energy < 0) {   // 点火中也适用：显示「若此刻关机」的预期轨道
         const pts = conicPoints(s, dx, dy, r);
         if (pts) {
             lastOrigin.x = s.x;

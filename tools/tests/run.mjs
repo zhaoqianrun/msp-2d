@@ -390,12 +390,22 @@ await testAsync('[6938f81] 读档只恢复相机 x/y/zoom，minZoom 不被旧档
     resetToGround();
 });
 
-test('[预测] 点火中预测限幅：近轨道椭圆不再全圈积分（上升段顿挫元凶）', () => {
-    // 500km 高、0.9 倍圆轨道速度 → 椭圆一圈约 40 万步；点火中必须被限到 3 万步内
+test('[预测] 点火中真空圆轨道画满一圈（旧限幅版只画 8 分钟——用户实测「画不完全」）', () => {
+    // 分级燃烧中最需要看轨道：真空束缚轨道 → 解析椭圆整圈完整，逐帧随燃烧更新
     const r0 = planet.radius + 500000;
-    const v = Math.sqrt(GRAVITY_MU / r0) * 0.9;
-    t.predictPath({ x: planet.x, y: planet.y - r0, vx: v, vy: 0 }, true, 60000000);
-    assert(__debugLastSteps() <= 30000, '点火中应限幅 3 万步, got ' + __debugLastSteps());
+    const v = Math.sqrt(GRAVITY_MU / r0);
+    const pts = t.predictPath({ x: planet.x, y: planet.y - r0, vx: v, vy: 0 }, true, 60000000);
+    assert(pts.length >= 700, '解析椭圆应画满一圈, got ' + pts.length / 2 + ' 点');
+    for (let i = 0; i < pts.length; i += 2) {
+        const rr = Math.hypot(pts[i] - planet.x, pts[i + 1] - planet.y);
+        near(rr, r0, r0 * 0.001, '圆轨道半径恒定');
+    }
+});
+test('[预测] 大气内点火：数值路径仍限幅（成本兜底保留）', () => {
+    // 5km 稠密大气内点火 → 数值路径（限幅 + 节流仍在）
+    const alt = planet.radius + 5000;
+    t.predictPath({ x: planet.x, y: planet.y - alt, vx: 300, vy: 0 }, true, 80000000);
+    assert(__debugLastSteps() <= 30000, '大气内数值路径应限幅, got ' + __debugLastSteps());
 });
 
 test('[输入] 100x 下旋转按真实时间响应：10 帧约 15°，不再一帧转一圈', () => {
