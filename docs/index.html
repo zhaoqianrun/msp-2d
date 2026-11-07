@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MSP-2D · Meows Space Project 2D</title>
+    <meta name="description" content="MSP-2D —— 一个开火箭、绕轨道、算引力的 2D 网页小游戏。真实牛顿引力、大气阻力、再入热、多级分离、降落伞。">
+    <link rel="stylesheet" href="css/shared.css">
+    <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+
+    <!-- ==================== 顶部导航 ==================== -->
+    <nav id="topnav">
+        <a class="brand" href="#top">
+            <img src="assets/logo.jpeg" alt="MSP-2D" class="brand-logo">
+            <span class="brand-text">MSP-2D</span>
+        </a>
+        <div class="nav-links">
+            <a href="#about">关于</a>
+            <a href="#features">特性</a>
+            <a href="#controls">操作</a>
+            <a href="#physics">物理</a>
+            <a href="#team">团队</a>
+            <a class="nav-play" href="#play">下载</a>
+        </div>
+    </nav>
+
+    <!-- ==================== 首屏 ==================== -->
+    <header id="top">
+        <div class="hero">
+            <div class="hero-kicker">MEOWS SPACE PROJECT</div>
+            <h1 class="hero-title">MSP-2D</h1>
+            <div class="hero-rule"></div>
+            <p class="hero-sub">
+                一个开火箭、绕轨道、算引力的 2D 网页小游戏。<br>
+                没有魔法数字，<strong>一切按真实物理来</strong>。
+            </p>
+            <div class="hero-actions">
+                <a class="btn btn-primary" href="msp2d.zip" download>下 载 游 戏</a>
+                <a class="btn" href="#play">了 解 更 多</a>
+            </div>
+            <div class="hero-stats">
+                <div class="stat"><span class="stat-num" id="stat-radius">2500</span><span class="stat-label">km 星球半径</span></div>
+                <div class="stat"><span class="stat-num" id="stat-g">3.71</span><span class="stat-label">m/s² 地表引力</span></div>
+                <div class="stat"><span class="stat-num">120</span><span class="stat-label">km 大气顶</span></div>
+                <div class="stat"><span class="stat-num">100x</span><span class="stat-label">最大时间倍率</span></div>
+            </div>
+        </div>
+        <div class="hero-cv">
+            <canvas id="hero-canvas"></canvas>
+        </div>
+        <div class="scroll-hint">▼</div>
+    </header>
+
+    <!-- ==================== 关于 ==================== -->
+    <section id="about">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">01 / 关于这个项目</div>
+            <div class="about-grid">
+                <div class="about-text">
+                    <h2>火箭不是往上飞的</h2>
+                    <p>
+                        大部分人第一次玩，都会把火箭直直地往天上怼 —— 然后发现燃料烧光了也进不了轨道。
+                    </p>
+                    <p>
+                        <strong>真正的做法是「重力转向」</strong>：先垂直爬出稠密大气，然后慢慢压弯，
+                        让火箭一边被引力拉着往下掉、一边加速到横向速度 —— 当你横着飞得足够快，
+                        「往下掉」的曲线就永远够不到地面了。这就是轨道。
+                    </p>
+                    <p>
+                        MSP-2D 把这一整套东西做进了一个网页里：真实的万有引力、指数衰减的大气、
+                        速度平方的空气阻力、再入时的气动加热、多级火箭分离、降落伞减速。
+                    </p>
+                    <p class="aside">
+                        整个游戏就是一个静态网页 + 一个 Python 标准库服务器，没有框架、没有构建工具。
+                    </p>
+                </div>
+                <div class="about-badges">
+                    <div class="badge msp-corners">
+                        <div class="badge-k">平台</div>
+                        <div class="badge-v">浏览器 / 手机</div>
+                    </div>
+                    <div class="badge msp-corners">
+                        <div class="badge-k">开发</div>
+                        <div class="badge-v">NotNormal</div>
+                    </div>
+                    <div class="badge msp-corners">
+                        <div class="badge-k">技术栈</div>
+                        <div class="badge-v">原生 JS + Canvas</div>
+                    </div>
+                    <div class="badge msp-corners">
+                        <div class="badge-k">开源</div>
+                        <div class="badge-v">GitHub</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 特性 ==================== -->
+    <section id="features">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">02 / 有什么好玩的</div>
+            <div class="feat-grid">
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">🚀</div>
+                    <h3>造船厂</h3>
+                    <p>拖拽零件组装火箭。控制舱、燃料箱、发动机、分离器、降落伞，几十种组合。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">🌍</div>
+                    <h3>真实引力</h3>
+                    <p>平方反比引力，随高度衰减。绕圈、转移轨道、逃逸，全都按牛顿算。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">🔥</div>
+                    <h3>再入加热</h3>
+                    <p>速度太快冲进大气会烧起来。每个部件有各自的耐热上限，烧穿了就炸。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">✂️</div>
+                    <h3>多级分离</h3>
+                    <p>按空格切断分离器，下级沿船轴抛离。分离出去的残骸继续保持惯性飞。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">🪂</div>
+                    <h3>降落伞</h3>
+                    <p>按 P 展开，减速实时取决于大气密度。高空几乎没用，越往下越猛。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">⏱️</div>
+                    <h3>时间加速</h3>
+                    <p>1x 到 100x。轨道周期动辄几千秒，不加速根本等不起。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">📈</div>
+                    <h3>轨道预测</h3>
+                    <p>实时画出你的飞行轨迹，包含引力和大气阻力。落点看得见。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">📱</div>
+                    <h3>手机也能玩</h3>
+                    <p>触控按键自动适配。同一个 WiFi 下，手机浏览器直接打开就能玩。</p>
+                </article>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 操作 ==================== -->
+    <section id="controls">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">03 / 怎么操作</div>
+            <div class="ctrl-grid">
+                <div class="ctrl-item"><span class="msp-kbd">E</span><span>点火 / 关机</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">A</span><span class="msp-kbd">D</span><span>左转 / 右转</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">↑</span><span class="msp-kbd">↓</span><span>油门</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">Shift</span><span>按住微调油门</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">[</span><span class="msp-kbd">]</span><span>缩放（或滚轮）</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">空格</span><span>分级 / 切断下一级</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">P</span><span>展开 / 切断降落伞</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">.</span><span class="msp-kbd">,</span><span>加速 / 减速时间</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">V</span><span>切换航天器</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">S</span><span class="msp-kbd">L</span><span>存档 / 读档</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">C</span><span>成就列表</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">R</span><span>重置这一趟</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">M</span><span>背景音乐</span></div>
+                <div class="ctrl-item"><span class="msp-kbd">ESC</span><span>暂停菜单</span></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 物理 ==================== -->
+    <section id="physics">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">04 / 底下是怎么算的</div>
+            <div class="phys-lead">
+                <p>游戏里没有任何「手感调参」。所有数字都是从真实物理推出来的 —— 想要飞得高，只能靠算。</p>
+            </div>
+            <div class="phys-grid">
+
+                <div class="phys-card msp-corners msp-scan">
+                    <div class="phys-hd">引力</div>
+                    <code class="phys-formula">g = g₀ · (R / r)²</code>
+                    <p>地表 3.71 m/s²（火星级别）。离地面越远越弱，平方反比。飞出大气后就是纯二体问题。</p>
+                </div>
+
+                <div class="phys-card msp-corners msp-scan">
+                    <div class="phys-hd">大气</div>
+                    <code class="phys-formula">ρ = e<sup>−h / H</sup></code>
+                    <p>标高 H = 23.1 km，120 km 处密度约 0.5%。再往上就不再计算阻力了 —— 不是硬墙，是真的没了。</p>
+                </div>
+
+                <div class="phys-card msp-corners msp-scan">
+                    <div class="phys-hd">空气阻力</div>
+                    <code class="phys-formula">F = k · ρ · v²</code>
+                    <p>速度平方。所以高速再入时阻力巨大，能把你直接减速到落体速度以下。</p>
+                </div>
+
+                <div class="phys-card msp-corners msp-scan">
+                    <div class="phys-hd">降落伞</div>
+                    <code class="phys-formula">F = k · A · ρ · v²</code>
+                    <p>和空气阻力同一套公式，只是等效面积 A 大得多。所以高空几乎没用，越往下越猛。</p>
+                </div>
+
+                <div class="phys-card msp-corners msp-scan">
+                    <div class="phys-hd">再入加热</div>
+                    <code class="phys-formula">Q ∝ v · ρ</code>
+                    <p>速度乘以密度。只有「高速 + 稠密大气」才会烧起来 —— 垂直往下掉反而不会。</p>
+                </div>
+
+                <div class="phys-card msp-corners msp-scan">
+                    <div class="phys-hd">质量变化</div>
+                    <code class="phys-formula">a = F / (m₀ + m<sub>fuel</sub>)</code>
+                    <p>油烧掉了船就变轻，同样的油门加速度更快。齐奥尔科夫斯基方程说的就是这件事。</p>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 下载 ==================== -->
+    <section id="play">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">05 / 下 载</div>
+            <div class="play-box msp-corners msp-corners--amber">
+                <h2>下载 MSP-2D</h2>
+                <p class="play-sub">完整游戏，8.6 MB，解压即用。</p>
+
+                <div class="download-main">
+                    <a class="btn btn-primary btn-lg" href="msp2d.zip" download>
+                        <span class="dl-icon">↓</span>
+                        <span>下 载 游 戏</span>
+                    </a>
+                    <div class="download-meta">
+                        <span>msp2d.zip</span>
+                        <span class="dot">·</span>
+                        <span>8.6 MB</span>
+                    </div>
+                </div>
+
+                <div class="play-note">
+                    <div class="note-hd">怎么玩</div>
+                    <ol class="steps">
+                        <li>
+                            <span class="step-n">1</span>
+                            <span>解压到一个文件夹</span>
+                        </li>
+                        <li>
+                            <span class="step-n">2</span>
+                            <span>装 <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a>（安装时勾选 <code>Add Python to PATH</code>）</span>
+                        </li>
+                        <li>
+                            <span class="step-n">3</span>
+                            <span>在文件夹里打开命令行，运行：</span>
+                        </li>
+                    </ol>
+                    <pre class="code-block">python server.py</pre>
+                    <p>浏览器会自动打开。也可以手动访问 <code>http://localhost:8080/play-main.html</code></p>
+                    <p class="note-dim">同一个 WiFi 下的手机也能玩 —— 服务器启动时会打印局域网地址。</p>
+                </div>
+
+                <div class="download-alt">
+                    <a href="https://github.com/zhaoqianrun/msp-2d" target="_blank" rel="noopener">或者从 GitHub 获取源码 →</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 团队 ==================== -->
+    <section id="team">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">06 / 谁做的</div>
+            <div class="team-box">
+                <div class="team-logo">
+                    <img src="assets/logo.jpeg" alt="NotNormal">
+                </div>
+                <div class="team-text">
+                    <h2>NotNormal</h2>
+                    <p>一个从零开始做游戏的团队。MSP-2D 是我们的第一个项目。</p>
+                    <p class="team-links">
+                        <a class="btn" href="https://space.bilibili.com/258037329" target="_blank" rel="noopener">B 站</a>
+                        <a class="btn" href="https://github.com/zhaoqianrun/msp-2d" target="_blank" rel="noopener">GitHub</a>
+                    </p>
+                    <p class="team-join">想加入？B 站私信我们。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 页脚 ==================== -->
+    <footer>
+        <div class="wrap footer-in">
+            <div class="footer-left">
+                <img src="assets/logo.jpeg" alt="" class="footer-logo">
+                <span>MSP-2D · Meows Space Project</span>
+            </div>
+            <div class="footer-right">
+                <a href="https://github.com/zhaoqianrun/msp-2d" target="_blank" rel="noopener">源码</a>
+                <a href="https://space.bilibili.com/258037329" target="_blank" rel="noopener">B 站</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/site.js"></script>
+</body>
+</html>
