@@ -87,37 +87,41 @@
         }
 
         // 画星球
+        // 不用大面积蓝黑渐变 —— 改成「实色球体 + 一圈冷调边缘」的仪表风格,
+        // 只有边缘一条细高光，避免整块发蓝。
         function drawPlanet() {
             const { x, y, r } = planet;
 
-            // 大气光晕（多层，越外越淡）
-            for (let i = 5; i >= 1; i--) {
-                const rr = r * (1 + i * 0.028);
-                const g = ctx.createRadialGradient(x, y, r * 0.9, x, y, rr);
-                g.addColorStop(0, 'rgba(74, 144, 217, 0.00)');
-                g.addColorStop(0.55, 'rgba(74, 144, 217, ' + (0.055 * (6 - i) / 5) + ')');
-                g.addColorStop(1, 'rgba(74, 144, 217, 0.00)');
-                ctx.fillStyle = g;
-                ctx.beginPath();
-                ctx.arc(x, y, rr, 0, Math.PI * 2);
-                ctx.fill();
-            }
+            // 大气光晕：只留一圈很窄的冷光，不再是 5 层发散的蓝雾
+            const g = ctx.createRadialGradient(x, y, r * 0.985, x, y, r * 1.045);
+            g.addColorStop(0,   'rgba(74, 144, 217, 0.16)');
+            g.addColorStop(0.55, 'rgba(74, 144, 217, 0.05)');
+            g.addColorStop(1,   'rgba(74, 144, 217, 0.00)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(x, y, r * 1.045, 0, Math.PI * 2);
+            ctx.fill();
 
-            // 星球本体
-            const bodyGrad = ctx.createRadialGradient(
-                x - r * 0.35, y - r * 0.4, r * 0.15,
-                x, y, r
-            );
-            bodyGrad.addColorStop(0, '#2a4a72');
-            bodyGrad.addColorStop(0.5, '#16293f');
-            bodyGrad.addColorStop(1, '#080d16');
-            ctx.fillStyle = bodyGrad;
+            // 星球本体：实色石板底，不加渐变
+            ctx.fillStyle = '#0a0f16';
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
 
-            // 边缘细亮线（大气层边界）
-            ctx.strokeStyle = 'rgba(74, 144, 217, .34)';
+            // 上缘一道细高光弧（表现受光面，比整块渐变克制）
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.strokeStyle = 'rgba(124, 160, 205, .12)';
+            ctx.lineWidth = r * 0.06;
+            ctx.beginPath();
+            ctx.arc(x, y, r * 0.94, Math.PI * 1.12, Math.PI * 1.88);
+            ctx.stroke();
+            ctx.restore();
+
+            // 边缘线（大气层边界）
+            ctx.strokeStyle = 'rgba(74, 144, 217, .38)';
             ctx.lineWidth = 1.2;
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);

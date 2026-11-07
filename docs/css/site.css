@@ -84,7 +84,7 @@ code { font-family: var(--mono); font-size: .92em; color: var(--amber); }
 }
 .nav-links a:hover {
     color: var(--text);
-    background: rgba(74, 144, 217, .10);
+    background: rgba(255, 255, 255, .055);
 }
 .nav-links .nav-play {
     margin-left: 8px;
@@ -111,7 +111,10 @@ section {
     padding: 84px 0;
 }
 section:nth-of-type(even) {
-    background: linear-gradient(180deg, transparent, rgba(12, 17, 25, .55) 12%, rgba(12, 17, 25, .55) 88%, transparent);
+    /* 用实色分隔 + 一条细线，不用纵向渐变带 */
+    background: #070b12;
+    border-top: 1px solid var(--line-dim);
+    border-bottom: 1px solid var(--line-dim);
 }
 .sec-hd {
     font-family: var(--mono);
@@ -167,7 +170,7 @@ section:nth-of-type(even) {
     line-height: 1;
     color: var(--text);
     /* 一点点发光，配合黑底 */
-    text-shadow: 0 0 60px rgba(74, 144, 217, .30);
+    text-shadow: 0 0 70px rgba(190, 210, 235, .10);
 }
 
 /* 刻度尺线：和主菜单同款 */
@@ -269,8 +272,8 @@ section:nth-of-type(even) {
     transition: border-color .15s, background .15s, box-shadow .15s, color .15s;
 }
 .btn:hover {
-    border-color: var(--blue);
-    background: rgba(74, 144, 217, .12);
+    border-color: var(--line-strong);
+    background: rgba(255, 255, 255, .06);
     box-shadow: inset 2px 0 0 var(--amber), var(--shadow);
 }
 .btn-primary {
@@ -344,7 +347,7 @@ section:nth-of-type(even) {
     transition: background .18s, border-color .18s, transform .18s;
 }
 .feat:hover {
-    background: #0f1520;
+    background: #11161f;
     border-color: var(--line);
     transform: translateY(-2px);
 }
@@ -424,7 +427,7 @@ section:nth-of-type(even) {
     display: block;
     padding: 12px 14px;
     margin-bottom: 14px;
-    background: rgba(74, 144, 217, .06);
+    background: rgba(255, 255, 255, .03);
     border: 1px solid var(--line-dim);
     border-radius: 2px;
     font-size: 15px;
