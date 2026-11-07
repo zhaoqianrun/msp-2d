@@ -351,11 +351,17 @@ section:nth-of-type(even) {
     border-color: var(--line);
     transform: translateY(-2px);
 }
+/* 特性卡片编号：等宽字 + 琥珀色，做成仪表刻度号的样子 */
 .feat-icon {
-    font-size: 22px;
+    font-family: var(--mono);
+    font-size: 11px;
     line-height: 1;
+    letter-spacing: .16em;
+    color: var(--amber);
     margin-bottom: 14px;
-    filter: grayscale(.25);
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line-dim);
+    opacity: .85;
 }
 .feat h3 {
     margin: 0 0 9px;
@@ -469,10 +475,6 @@ section:nth-of-type(even) {
 }
 .download-main .btn:hover {
     transform: translateY(-2px);
-}
-.dl-icon {
-    font-size: 17px;
-    line-height: 1;
 }
 .download-meta {
     font-family: var(--mono);
