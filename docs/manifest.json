@@ -1,0 +1,13 @@
+{
+  "name": "MSP-2D · Meows Space Project 2D",
+  "short_name": "MSP-2D",
+  "description": "开火箭、绕轨道、算引力的 2D 太空游戏",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#05070d",
+  "theme_color": "#05070d",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

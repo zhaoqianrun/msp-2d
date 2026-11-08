@@ -4,7 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MSP-2D · Meows Space Project 2D</title>
-    <meta name="description" content="MSP-2D —— 一个开火箭、绕轨道、算引力的 2D 网页小游戏。真实牛顿引力、大气阻力、再入热、多级分离、降落伞。">
+    <meta name="description" content="MSP-2D —— 一个开火箭、绕轨道、算引力的 2D 网页小游戏。真实牛顿引力、大气阻力、再入热、多级分离、降落伞。浏览器直接跑，手机也能玩。">
+    <meta name="theme-color" content="#05070d">
+
+    <!-- Open Graph：分享到聊天软件时显示的卡片 -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="MSP-2D · Meows Space Project 2D">
+    <meta property="og:description" content="开火箭、绕轨道、算引力。一个按真实物理跑的 2D 太空游戏。">
+    <meta property="og:image" content="assets/icon-512.png">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <!-- 网站图标 -->
+    <link rel="icon" href="assets/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/icon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/icon-16.png">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.json">
+
     <link rel="stylesheet" href="css/shared.css">
     <link rel="stylesheet" href="css/site.css">
 </head>
@@ -21,6 +37,8 @@
             <a href="#features">特性</a>
             <a href="#controls">操作</a>
             <a href="#physics">物理</a>
+            <a href="#glossary">术语</a>
+            <a href="#roadmap">路线图</a>
             <a href="#team">团队</a>
             <a class="nav-play" href="#play">下载</a>
         </div>
@@ -61,19 +79,24 @@
                 <div class="about-text">
                     <h2>火箭不是往上飞的</h2>
                     <p>
-                        大部分人第一次玩，都会把火箭直直地往天上怼 —— 然后发现燃料烧光了也进不了轨道。
+                        第一次玩，几乎所有人都会把火箭直直地怼上天。然后燃料烧光，
+                        火箭停在半空，掉回来。
                     </p>
                     <p>
-                        <strong>真正的做法是「重力转向」</strong>：先垂直爬出稠密大气，然后慢慢压弯，
-                        让火箭一边被引力拉着往下掉、一边加速到横向速度 —— 当你横着飞得足够快，
-                        「往下掉」的曲线就永远够不到地面了。这就是轨道。
+                        <strong>火箭真正的飞法是「横着飞」。</strong>
+                        先垂直爬出稠密大气，再慢慢压弯机头，
+                        一边被引力拽着往下掉、一边加速攒横向速度 ——
+                        等你横着飞得足够快，「往下掉」的那条曲线就永远够不到地面了。
+                        <a class="term" href="#glossary">这就是轨道</a>。
                     </p>
                     <p>
-                        MSP-2D 把这一整套东西做进了一个网页里：真实的万有引力、指数衰减的大气、
+                        这一整套东西都塞进了一个网页：真实的万有引力、指数衰减的大气密度、
                         速度平方的空气阻力、再入时的气动加热、多级火箭分离、降落伞减速。
+                        没有为了「好玩」而改过的物理常数。
                     </p>
                     <p class="aside">
-                        整个游戏就是一个静态网页 + 一个 Python 标准库服务器，没有框架、没有构建工具。
+                        整个游戏就是一个静态网页加一个 Python 标准库服务器。
+                        没有框架，没有构建工具，没有 npm install。
                     </p>
                 </div>
                 <div class="about-badges">
@@ -107,13 +130,13 @@
                 <article class="feat msp-corners">
                     <div class="feat-icon">01</div>
                     <h3>造船厂</h3>
-                    <p>拖拽零件组装火箭。控制舱、燃料箱、发动机、分离器、降落伞，几十种组合。</p>
+                    <p>拖拽零件组装火箭。控制舱、燃料箱、发动机、分离器、降落伞，想造多高造多高。</p>
                 </article>
 
                 <article class="feat msp-corners">
                     <div class="feat-icon">02</div>
                     <h3>真实引力</h3>
-                    <p>平方反比引力，随高度衰减。绕圈、转移轨道、逃逸，全都按牛顿算。</p>
+                    <p>平方反比，离得越远越弱。你想飞多高，就得先算清楚要多少速度。</p>
                 </article>
 
                 <article class="feat msp-corners">
@@ -125,7 +148,7 @@
                 <article class="feat msp-corners">
                     <div class="feat-icon">04</div>
                     <h3>多级分离</h3>
-                    <p>按空格切断分离器，下级沿船轴抛离。分离出去的残骸继续保持惯性飞。</p>
+                    <p>按空格切断分离器，下级整截抛离。抛掉的还在天上飞，撞到东西会炸。</p>
                 </article>
 
                 <article class="feat msp-corners">
@@ -137,7 +160,7 @@
                 <article class="feat msp-corners">
                     <div class="feat-icon">06</div>
                     <h3>时间加速</h3>
-                    <p>1x 到 100x。轨道周期动辄几千秒，不加速根本等不起。</p>
+                    <p>1x 到 100x。绕一圈要四千多秒，不加速你根本等不起。</p>
                 </article>
 
                 <article class="feat msp-corners">
@@ -149,7 +172,19 @@
                 <article class="feat msp-corners">
                     <div class="feat-icon">08</div>
                     <h3>手机也能玩</h3>
-                    <p>触控按键自动适配。同一个 WiFi 下，手机浏览器直接打开就能玩。</p>
+                    <p>触控按键自动适配，双指捏合缩放。同一个 WiFi 下手机直接打开就能玩。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">09</div>
+                    <h3>自动更新</h3>
+                    <p>启动时自动问官网有没有新版本。有的话一键更新，存档不会丢。</p>
+                </article>
+
+                <article class="feat msp-corners">
+                    <div class="feat-icon">10</div>
+                    <h3>在线协同</h3>
+                    <p>同一局域网内，一台电脑操控，其它设备看直播。观察站还能接管分离出去的残骸。</p>
                 </article>
 
             </div>
@@ -228,10 +263,93 @@
         </div>
     </section>
 
+
+    <!-- ==================== 术语表 ==================== -->
+    <section id="glossary">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">05 / 几个术语</div>
+            <div class="gloss-lead">
+                <p>游戏里会出现这些词。不想查维基的话，看这里就够了。</p>
+            </div>
+            <dl class="gloss-list">
+
+                <div class="gloss-item msp-corners">
+                    <dt>重力转向 <span class="gloss-en">Gravity Turn</span></dt>
+                    <dd>
+                        火箭起飞后不是一直往上飞，而是边升边往侧面偏。
+                        到某个高度时机头已经快横过来了 —— 这时候引力不再拖你后腿，
+                        反而变成向心力。这是所有真实火箭的通用做法。
+                    </dd>
+                </div>
+
+                <div class="gloss-item msp-corners">
+                    <dt>轨道 <span class="gloss-en">Orbit</span></dt>
+                    <dd>
+                        一直在往下掉，但横着移动得足够快，地面在脚下「退开」的速度
+                        刚好等于你下落的速度。于是你永远掉不到地上。
+                        <strong>轨道不是「没有引力」，而是「一直在自由落体」。</strong>
+                    </dd>
+                </div>
+
+                <div class="gloss-item msp-corners">
+                    <dt>逃逸速度 <span class="gloss-en">Escape Velocity</span></dt>
+                    <dd>
+                        快到引力再也拉不回来、可以永远飞走的速度。
+                        这个星球是 2.5 km/s 左右 —— 约为入轨速度的 1.4 倍。
+                        实际游戏中很难做到，因为燃料远远不够。
+                    </dd>
+                </div>
+
+                <div class="gloss-item msp-corners">
+                    <dt>远地点 / 近地点 <span class="gloss-en">Apoapsis / Periapsis</span></dt>
+                    <dd>
+                        椭圆轨道上离星球最远、最近的两个点。
+                        近地点一旦掉到大气层里，你就会开始被空气减速 —— 该再入的时候了。
+                    </dd>
+                </div>
+
+                <div class="gloss-item msp-corners">
+                    <dt>再入 <span class="gloss-en">Re-entry</span></dt>
+                    <dd>
+                        从轨道回到地面的过程。以轨道速度冲进大气，
+                        空气被剧烈压缩产生上千度高温，容易把部件烧穿。
+                        减速太快会烧毁，减速太慢会弹回太空 —— 角度很讲究。
+                    </dd>
+                </div>
+
+                <div class="gloss-item msp-corners">
+                    <dt>推重比 <span class="gloss-en">Thrust-to-Weight Ratio</span></dt>
+                    <dd>
+                        发动机推力除以整艘飞船的重量。
+                        小于 1 就飞不起来，刚好 1 只能悬停，1.5 到 2 之间比较理想。
+                    </dd>
+                </div>
+
+                <div class="gloss-item msp-corners">
+                    <dt>比冲 <span class="gloss-en">Specific Impulse</span></dt>
+                    <dd>
+                        燃料「有多耐烧」的指标。相同的燃料，比冲越高能提供的速度越多。
+                        游戏里用油箱容量和发动机推力的组合近似表达。
+                    </dd>
+                </div>
+
+                <div class="gloss-item msp-corners">
+                    <dt>二体问题 <span class="gloss-en">Two-Body Problem</span></dt>
+                    <dd>
+                        只有两个物体、只考虑它们之间的引力。
+                        这是唯一能算出精确解析解的天体力学情形 —— 三个天体就没有公式解了。
+                        游戏里飞出大气之后，基本就是二体问题。
+                    </dd>
+                </div>
+
+            </dl>
+        </div>
+    </section>
+
     <!-- ==================== 下载 ==================== -->
     <section id="play">
         <div class="wrap">
-            <div class="sec-hd msp-hd">05 / 下 载</div>
+            <div class="sec-hd msp-hd">06 / 下 载</div>
             <div class="play-box msp-corners msp-corners--amber">
                 <h2>下载 MSP-2D</h2>
                 <p class="play-sub">完整游戏，8.6 MB，解压即用。</p>
@@ -275,10 +393,93 @@
         </div>
     </section>
 
+
+    <!-- ==================== 路线图 ==================== -->
+    <section id="roadmap">
+        <div class="wrap">
+            <div class="sec-hd msp-hd">07 / 接下来做什么</div>
+            <div class="road-lead">
+                <p>现在能玩的已经能玩，但离做完还有距离。下面是我们在排队的事 —— 顺序会变，想法也会变。</p>
+            </div>
+
+            <div class="road-track">
+
+                <div class="road-row road-done">
+                    <div class="road-mark"></div>
+                    <div class="road-body msp-corners">
+                        <div class="road-when">已完成</div>
+                        <div class="road-what">核心飞行</div>
+                        <p>真实引力、大气阻力、再入加热、着陆判定、部件损毁</p>
+                    </div>
+                </div>
+
+                <div class="road-row road-done">
+                    <div class="road-mark"></div>
+                    <div class="road-body msp-corners">
+                        <div class="road-when">已完成</div>
+                        <div class="road-what">造船厂</div>
+                        <p>拖拽组装、多级分离、降落伞、结构完整性检查</p>
+                    </div>
+                </div>
+
+                <div class="road-row road-done">
+                    <div class="road-mark"></div>
+                    <div class="road-body msp-corners">
+                        <div class="road-when">已完成</div>
+                        <div class="road-what">多船与协同</div>
+                        <p>航天器切换、残骸碰撞、观察站接管、局域网多人</p>
+                    </div>
+                </div>
+
+                <div class="road-row road-wip">
+                    <div class="road-mark"></div>
+                    <div class="road-body msp-corners">
+                        <div class="road-when">进行中</div>
+                        <div class="road-what">自动更新</div>
+                        <p>启动检查新版本、一键更新并保护存档、成就随存档走</p>
+                    </div>
+                </div>
+
+                <div class="road-row road-next">
+                    <div class="road-mark"></div>
+                    <div class="road-body msp-corners">
+                        <div class="road-when">接下来</div>
+                        <div class="road-what">多个天体</div>
+                        <p>月球、第二颗行星、转移窗口 —— 真正需要规划航线的尺度</p>
+                    </div>
+                </div>
+
+                <div class="road-row road-next">
+                    <div class="road-mark"></div>
+                    <div class="road-body msp-corners">
+                        <div class="road-when">接下来</div>
+                        <div class="road-what">轨道规划</div>
+                        <p>看得见的转移轨迹、燃烧节点、预测落点</p>
+                    </div>
+                </div>
+
+                <div class="road-row road-later">
+                    <div class="road-mark"></div>
+                    <div class="road-body msp-corners">
+                        <div class="road-when">以后</div>
+                        <div class="road-what">任务与目标</div>
+                        <p>成体系的挑战关卡，而不是只靠玩家自己找乐子</p>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="road-foot">
+                想催哪个？<a href="https://space.bilibili.com/258037329" target="_blank" rel="noopener">来 B 站说</a>。
+                完整清单在 <a href="https://github.com/zhaoqianrun/msp-2d/blob/master/KNOWN_ISSUES.md" target="_blank" rel="noopener">KNOWN_ISSUES.md</a>。
+            </div>
+        </div>
+    </section>
+
     <!-- ==================== 团队 ==================== -->
     <section id="team">
         <div class="wrap">
-            <div class="sec-hd msp-hd">06 / 谁做的</div>
+            <div class="sec-hd msp-hd">08 / 谁做的</div>
             <div class="team-box">
                 <div class="team-logo">
                     <img src="assets/logo.jpeg" alt="NotNormal">

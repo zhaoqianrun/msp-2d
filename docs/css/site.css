@@ -614,6 +614,198 @@ footer {
 .footer-right a { color: var(--dim); }
 .footer-right a:hover { color: var(--amber); }
 
+
+/* ==================== 术语表 ==================== */
+.gloss-lead {
+    margin-bottom: 34px;
+    padding: 18px 22px;
+    background: rgba(255, 195, 92, .05);
+    border-left: 2px solid var(--amber);
+    font-size: 14.5px;
+    color: #a9bdd6;
+}
+.gloss-lead p { margin: 0; }
+
+.gloss-list {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 3px;
+}
+
+.gloss-item {
+    padding: 22px 24px;
+    background: var(--surf-2);
+    border: 1px solid var(--line-dim);
+    transition: background .18s, border-color .18s;
+}
+.gloss-item:hover {
+    background: #11161f;
+    border-color: var(--line);
+}
+
+.gloss-item dt {
+    font-size: 15.5px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: .05em;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.gloss-en {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: normal;
+    color: var(--dim);
+    letter-spacing: .04em;
+}
+
+.gloss-item dd {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--dim);
+    line-height: 1.8;
+}
+.gloss-item dd strong { color: var(--text); font-weight: 600; }
+
+/* 正文里的术语链接 */
+.term {
+    color: var(--amber);
+    border-bottom: 1px dashed rgba(255, 195, 92, .45);
+    text-decoration: none;
+    transition: border-color .14s, color .14s;
+}
+.term:hover {
+    color: #ffd88a;
+    border-bottom-color: var(--amber);
+}
+
+/* ==================== 路线图 ==================== */
+.road-lead {
+    margin-bottom: 38px;
+    padding: 18px 22px;
+    background: rgba(255, 195, 92, .05);
+    border-left: 2px solid var(--amber);
+    font-size: 14.5px;
+    color: #a9bdd6;
+}
+.road-lead p { margin: 0; }
+
+.road-track {
+    position: relative;
+    padding-left: 34px;
+}
+/* 竖轴：一条细线 */
+.road-track::before {
+    content: '';
+    position: absolute;
+    left: 7px;
+    top: 10px;
+    bottom: 10px;
+    width: 1px;
+    background: var(--line-dim);
+}
+
+.road-row {
+    position: relative;
+    margin-bottom: 12px;
+}
+.road-row:last-child { margin-bottom: 0; }
+
+.road-mark {
+    position: absolute;
+    left: -34px;
+    top: 20px;
+    width: 9px;
+    height: 9px;
+    border: 1px solid var(--line-strong);
+    background: var(--bg);
+    transform: rotate(45deg);
+}
+
+/* 已完成：琥珀实心 */
+.road-done .road-mark {
+    background: var(--amber);
+    border-color: var(--amber);
+}
+/* 进行中：琥珀空心 + 呼吸 */
+.road-wip .road-mark {
+    background: var(--bg);
+    border-color: var(--amber);
+    animation: roadPulse 2.4s ease-in-out infinite;
+}
+@keyframes roadPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 195, 92, .45); }
+    50%      { box-shadow: 0 0 0 5px rgba(255, 195, 92, 0); }
+}
+/* 接下来：亮灰 */
+.road-next .road-mark {
+    background: var(--line-strong);
+    border-color: var(--line-strong);
+}
+/* 以后：暗 */
+.road-later .road-mark {
+    background: transparent;
+    border-color: var(--line-dim);
+}
+
+.road-body {
+    padding: 16px 20px 17px;
+    background: var(--surf-2);
+    border: 1px solid var(--line-dim);
+    transition: background .18s, border-color .18s;
+}
+.road-body:hover {
+    background: #11161f;
+    border-color: var(--line);
+}
+.road-done .road-body { opacity: .72; }
+
+.road-when {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .16em;
+    color: var(--dim);
+    margin-bottom: 7px;
+}
+.road-done .road-when { color: var(--amber); }
+.road-wip .road-when  { color: var(--amber); }
+
+.road-what {
+    font-size: 15.5px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: .05em;
+    margin-bottom: 7px;
+}
+.road-body p {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--dim);
+    line-height: 1.7;
+}
+
+.road-foot {
+    margin-top: 30px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line-dim);
+    font-size: 13.5px;
+    color: var(--dim);
+    text-align: center;
+}
+.road-foot a { color: var(--amber); }
+.road-foot a:hover { text-decoration: underline; }
+
+/* 窄屏 */
+@media (max-width: 700px) {
+    .gloss-list { grid-template-columns: 1fr; }
+    .road-track { padding-left: 26px; }
+    .road-mark { left: -26px; }
+}
+
 /* ==================== 响应式 ==================== */
 @media (max-width: 860px) {
     .about-grid { grid-template-columns: 1fr; gap: 32px; }
