@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
-  "released": "2026-11-07",
+  "version": "1.0.1",
+  "released": "2026-11-08",
   "zip": "https://zhaoqianrun.github.io/msp-2d/msp2d.zip",
-  "notes": "首个公开发布版",
+  "notes": "这是一个测试版本号，用来验证更新弹窗会不会出现。\n\n看到这个说明弹窗工作正常。",
   "minSupported": "0.0.0"
 }
