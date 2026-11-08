@@ -390,6 +390,83 @@
             .tbtn.small { min-width: 48px; padding: 7px 4px; font-size: 11px; }
             #t-ignite { padding: 13px 8px; font-size: 15px; }
         }
+        /* ==================== 更新提示弹窗 ==================== */
+        .up-mask {
+            position: fixed; inset: 0; z-index: 300;
+            display: none;
+            align-items: center; justify-content: center;
+            background: rgba(5, 7, 13, .82);
+        }
+        .up-mask.show { display: flex; }
+
+        .up-box {
+            width: min(420px, calc(100vw - 40px));
+            background: var(--surf-3);
+            border: 1px solid var(--line);
+            padding: 24px 24px 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, .6);
+        }
+
+        .up-hd {
+            display: flex; align-items: center; gap: 9px;
+            font-family: var(--mono);
+            font-size: 12px; letter-spacing: .14em;
+            color: var(--dim);
+            padding-bottom: 12px; margin-bottom: 16px;
+            border-bottom: 1px solid var(--line-dim);
+        }
+        .up-tick { width: 2px; height: 11px; background: var(--amber); flex: none; }
+
+        .up-row {
+            display: flex; justify-content: space-between;
+            padding: 7px 0;
+            font-size: 13.5px;
+        }
+        .up-k { color: var(--dim); }
+        .up-v { font-family: var(--mono); color: var(--text); }
+        .up-new { color: var(--amber); }
+
+        .up-notes {
+            margin-top: 12px; padding: 11px 13px;
+            background: rgba(255, 255, 255, .03);
+            border-left: 2px solid var(--line-strong);
+            font-size: 12.5px; color: var(--dim);
+            line-height: 1.65;
+            max-height: 110px; overflow-y: auto;
+        }
+        .up-notes:empty { display: none; }
+
+        .up-actions {
+            display: flex; gap: 9px; margin-top: 20px;
+        }
+        .up-btn {
+            flex: 1;
+            padding: 11px 16px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 3px;
+            color: var(--text);
+            font-size: 13px; letter-spacing: .12em;
+            font-family: inherit; cursor: pointer;
+            transition: border-color .14s, background .14s, color .14s;
+        }
+        .up-btn:hover { border-color: var(--line-strong); background: rgba(255, 255, 255, .06); }
+        .up-btn:disabled { opacity: .45; cursor: default; }
+        .up-btn-primary { border-color: rgba(255, 195, 92, .45); color: var(--amber); }
+        .up-btn-primary:hover { background: var(--amber); color: #0a0e14; border-color: var(--amber); }
+
+        .up-status {
+            margin-top: 12px;
+            font-family: var(--mono);
+            font-size: 11.5px;
+            color: var(--dim);
+            min-height: 16px;
+            text-align: center;
+            letter-spacing: .04em;
+        }
+        .up-status.err { color: var(--red); }
+        .up-status.ok { color: var(--green); }
+
     </style>
 </head>
 <body>
@@ -492,6 +569,32 @@
             <button class="tbtn" id="t-thr-down">油门 −</button>
             <button class="tbtn" id="t-thr-up">油门 ＋</button>
             <button class="tbtn wide" id="t-ignite">点火 / 关机</button>
+        </div>
+    </div>
+
+    <!-- ==================== 更新提示弹窗 ==================== -->
+    <div id="update-mask" class="up-mask">
+        <div class="up-box msp-corners msp-corners--amber">
+            <div class="up-hd">
+                <span class="up-tick"></span>
+                <span>检 测 到 新 版 本</span>
+            </div>
+            <div class="up-body">
+                <div class="up-row">
+                    <span class="up-k">当前版本</span>
+                    <span class="up-v" id="up-from">-</span>
+                </div>
+                <div class="up-row">
+                    <span class="up-k">最新版本</span>
+                    <span class="up-v up-new" id="up-to">-</span>
+                </div>
+                <div class="up-notes" id="up-notes"></div>
+            </div>
+            <div class="up-actions">
+                <button class="up-btn up-btn-primary" id="up-yes">更 新</button>
+                <button class="up-btn" id="up-no">稍 后 再 说</button>
+            </div>
+            <div class="up-status" id="up-status"></div>
         </div>
     </div>
 

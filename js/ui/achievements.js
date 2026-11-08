@@ -62,6 +62,35 @@ export function saveAchievements() {
     try { localStorage.setItem('msp2d-achievements', JSON.stringify([...achieved])); } catch (err) {}
 }
 
+// ==================== 成就跟存档走 ====================
+// localStorage 只活在这台浏览器里，换台电脑就没了。
+// 存档（savegame.json）是跟人走的，所以成就也塞进去一份。
+//
+// 两条路同时保留：
+//   · localStorage —— 不开服务器（直接开 html）时也能记住
+//   · 存档文件    —— 换电脑/换浏览器、给朋友看进度都带着
+export function exportAchievements() {
+    return [...achieved];
+}
+
+// 从存档恢复成就。和现有的取并集 ——
+// 存档里没有的（比如刚在浏览器里拿到的）不会被抹掉。
+export function importAchievements(list) {
+    if (!Array.isArray(list)) return 0;
+    let added = 0;
+    list.forEach((id) => {
+        if (typeof id === 'string' && !achieved.has(id)) {
+            // 只认确实存在的成就 id，防止脏数据
+            if (achievements.some((a) => a.id === id)) {
+                achieved.add(id);
+                added++;
+            }
+        }
+    });
+    if (added > 0) saveAchievements();
+    return added;
+}
+
 export function unlock(id) {
     if (achieved.has(id) || pendingSettlement.some((a) => a.id === id)) return;
     const a = achievements.find((x) => x.id === id);

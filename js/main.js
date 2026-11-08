@@ -15,7 +15,9 @@ import { predictPath, predictPathOrigin } from './physics/prediction.js';
 import { camera } from './render/camera.js';
 import { skyTint, starVisibility, skyAmount, atmoView, makeStarLayer, STAR_COLORS } from './render/sky.js';
 import { unlock, settleMission, updateAchievementToast, toggleAchievementPanel,
-         resetToasts, toastQueue, achieved, achievements } from './ui/achievements.js';
+         resetToasts, toastQueue, achieved, achievements,
+    exportAchievements, importAchievements } from './ui/achievements.js';
+import { GAME_VERSION, checkForUpdate, applyUpdate, serverSupportsUpdate } from './ui/update.js';
 import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu.js';
 
 
@@ -3358,6 +3360,75 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
 
         // 游戏主循环启动 + 和服务器建立协同
         requestAnimationFrame(gameLoop);
+
+// ==================== 启动时检查更新 ====================
+// 不阻塞游戏：主循环已经在跑了，这里只是后台问一句官网。
+// 查到新版本才弹窗；任何错误都静默跳过，绝不影响玩。
+(function bootUpdateCheck() {
+    const mask = document.getElementById('update-mask');
+    if (!mask) return;
+    const elFrom = document.getElementById('up-from');
+    const elTo = document.getElementById('up-to');
+    const elNotes = document.getElementById('up-notes');
+    const elStatus = document.getElementById('up-status');
+    const btnYes = document.getElementById('up-yes');
+    const btnNo = document.getElementById('up-no');
+
+    function close() { mask.classList.remove('show'); }
+    function setStatus(msg, kind) {
+        elStatus.textContent = msg || '';
+        elStatus.className = 'up-status' + (kind ? ' ' + kind : '');
+    }
+
+    if (btnNo) btnNo.addEventListener('click', close);
+
+    if (btnYes) {
+        btnYes.addEventListener('click', async () => {
+            btnYes.disabled = true;
+            btnNo.disabled = true;
+
+            // 先问服务端支不支持
+            const supported = await serverSupportsUpdate();
+            if (!supported) {
+                setStatus('当前是用静态方式打开的，服务端没有更新接口。', 'err');
+                setTimeout(() => {
+                    close();
+                    toastQueue.push({
+                        title: '无 法 自 动 更 新',
+                        name: '请用 python server.py 启动',
+                        desc: '或者手动下载新版覆盖',
+                    });
+                }, 1200);
+                return;
+            }
+
+            setStatus('正在下载…');
+            try {
+                const result = await applyUpdate(window.__pendingUpdateZip || '');
+                setStatus('更新完成，正在刷新…', 'ok');
+                setTimeout(() => location.reload(), 900);
+            } catch (err) {
+                setStatus('更新失败：' + (err.message || err), 'err');
+                btnYes.disabled = false;
+                btnNo.disabled = false;
+            }
+        });
+    }
+
+    // 延迟 1.5 秒再查 —— 别和首屏渲染抢带宽
+    setTimeout(async () => {
+        const info = await checkForUpdate();
+        if (!info.ok || !info.hasUpdate) return;   // 没更新 / 查不到，静默
+
+        window.__pendingUpdateZip = info.zip;
+        elFrom.textContent = 'v' + GAME_VERSION;
+        elTo.textContent = 'v' + info.latest;
+        if (info.notes) elNotes.textContent = info.notes;
+        if (info.released) elNotes.textContent = (info.notes || '') + (info.notes ? '\n' : '') + '发布于 ' + info.released;
+        mask.classList.add('show');
+    }, 1500);
+})();
+
         pollControl();
 
         // 建立统一视图，并把玩家这艘登记进航天器列表。
@@ -3455,7 +3526,8 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
                 return;
             }
             unlock('save_game');
-            const data = { planet, rocket, camera };
+            // 成就也跟着存档走 —— localStorage 只在这台浏览器，换台电脑就丢了
+            const data = { planet, rocket, camera, achievements: exportAchievements() };
             fetch(apiUrl('/api/save'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3519,6 +3591,15 @@ import { initPauseMenu, setPauseMenuOpen, isPauseMenuOpen } from './ui/pauseMenu
                     camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom));
                     resetInterp();   // 读档是传送：插值状态归位
                     chuteStates = {};   // 读档的船伞全部重新包好
+                    // 恢复成就（和浏览器里已有的取并集，不会把本机拿到的抹掉）
+                    const gotAch = importAchievements(data.achievements);
+                    if (gotAch > 0) {
+                        toastQueue.push({
+                            title: '成 就 恢 复',
+                            name: '补回了 ' + gotAch + ' 个',
+                            desc: '来自存档文件',
+                        });
+                    }
                     setFuelRatio(rocket.fuel);   // 旧档的燃料比作用到各油箱
                     alert('读档成功！');
                 })

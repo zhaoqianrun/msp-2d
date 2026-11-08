@@ -1,5 +1,9 @@
 import http.server
 import json
+import shutil
+import tempfile
+import zipfile
+import urllib.request
 import os
 import socket
 import subprocess
@@ -15,6 +19,10 @@ ADMIN_TOKEN = "msp2d-admin"
 # 以“本文件所在目录”为基准：双击运行、或在别的目录里运行，都能找到网页和存档
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAVE_PATH = os.path.join(BASE_DIR, "savegame.json")
+
+# 自动更新的默认下载源（官网的 msp2d.zip）
+# 前端一般会自己传 zip 地址过来，这里是兜底用的
+DEFAULT_UPDATE_ZIP = "https://zhaoqianrun.github.io/msp-2d/msp2d.zip"
 SHIP_PATH = os.path.join(BASE_DIR, "ship.json")   # 造船厂造的飞船
 
 # ==================== 多端协同（服主分配操控 / 观战）====================
@@ -541,7 +549,127 @@ class GameHandler(http.server.SimpleHTTPRequestHandler):
         if route == "/api/kick":
             self.handle_kick()
             return
+        if route == "/api/update":
+            self.handle_update()
+            return
         super().do_POST()
+
+    def do_OPTIONS(self):
+        """给 /api/update 做能力探测用（浏览器判断服务端支不支持自动更新）"""
+        route = self.path.split("?")[0]
+        if route == "/api/update":
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        super().do_OPTIONS()
+
+    # ==================== 自动更新 ====================
+    # 浏览器没权限写磁盘，所以下载+解压+覆盖全在服务端做。
+    #
+    # 【保护存档】这是整件事最关键的地方：
+    #   · 玩家存档（savegame.json / ship.json / clients.json / shared-state.json）
+    #     一律跳过，绝不覆盖 —— 更新只换程序文件
+    #   · 更新前把存档备份到 backups/ 目录，万一出事能找回来
+    #   · 解压时先解到临时目录，成功后再逐个文件替换（半路失败不会留下残缺的程序）
+    PROTECTED_FILES = {
+        "savegame.json", "savegame.json.tmp",
+        "ship.json", "clients.json", "shared-state.json",
+    }
+
+    def handle_update(self):
+        stamp = time.strftime("%H:%M:%S")
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 64 * 1024:
+            self.send_json({"ok": False, "error": "bad size"}, status=400)
+            return
+        raw = self.rfile.read(length)
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_json({"ok": False, "error": "invalid json"}, status=400)
+            return
+
+        zip_url = (payload or {}).get("zip") or DEFAULT_UPDATE_ZIP
+        if not isinstance(zip_url, str) or not zip_url.startswith(("http://", "https://")):
+            self.send_json({"ok": False, "error": "bad zip url"}, status=400)
+            return
+
+        print(f"[{stamp}] [更新] 开始，源: {zip_url}")
+
+        # ---- 1. 备份存档 ----
+        try:
+            backup_dir = os.path.join(BASE_DIR, "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            saved = []
+            for name in self.PROTECTED_FILES:
+                src = os.path.join(BASE_DIR, name)
+                if os.path.isfile(src):
+                    dst = os.path.join(backup_dir, name + "." + time.strftime("%Y%m%d-%H%M%S"))
+                    shutil.copy2(src, dst)
+                    saved.append(name)
+            if saved:
+                print(f"[{stamp}] [更新] 存档已备份: {', '.join(saved)}")
+        except OSError as e:
+            print(f"[{stamp}] [更新] 备份失败（继续）: {e}")
+
+        # ---- 2. 下载 zip ----
+        tmp_root = tempfile.mkdtemp(prefix="msp2d-update-")
+        zip_path = os.path.join(tmp_root, "update.zip")
+        try:
+            with urllib.request.urlopen(zip_url, timeout=60) as resp, open(zip_path, "wb") as out:
+                shutil.copyfileobj(resp, out)
+            size = os.path.getsize(zip_path)
+            print(f"[{stamp}] [更新] 下载完成 {size / 1024 / 1024:.1f} MB")
+
+            # ---- 3. 解压到临时目录 ----
+            extract_dir = os.path.join(tmp_root, "extract")
+            with zipfile.ZipFile(zip_path) as zf:
+                # 防 zip slip：不许有 .. 或绝对路径
+                for name in zf.namelist():
+                    norm = os.path.normpath(name)
+                    if norm.startswith("..") or os.path.isabs(norm):
+                        raise ValueError("压缩包里有非法路径: " + name)
+                zf.extractall(extract_dir)
+
+            # zip 里如果有个顶层目录（msp2d/），钻进去
+            entries = os.listdir(extract_dir)
+            if len(entries) == 1 and os.path.isdir(os.path.join(extract_dir, entries[0])):
+                extract_dir = os.path.join(extract_dir, entries[0])
+
+            # ---- 4. 逐个文件覆盖（跳过存档）----
+            replaced, skipped = 0, 0
+            for root, dirs, files in os.walk(extract_dir):
+                rel_root = os.path.relpath(root, extract_dir)
+                if rel_root == ".":
+                    rel_root = ""
+                # 跳过不该覆盖的目录
+                dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", "backups")]
+
+                for fn in files:
+                    # 存档文件一律不碰
+                    if fn in self.PROTECTED_FILES:
+                        skipped += 1
+                        continue
+                    src = os.path.join(root, fn)
+                    dst = os.path.join(BASE_DIR, rel_root, fn) if rel_root else os.path.join(BASE_DIR, fn)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+                    replaced += 1
+
+            print(f"[{stamp}] [更新] 完成：覆盖 {replaced} 个文件，跳过 {skipped} 个存档")
+            self.send_json({"ok": True, "replaced": replaced, "skipped": skipped,
+                            "message": "更新完成，刷新页面生效"})
+
+        except Exception as e:
+            print(f"[{stamp}] [更新] 失败: {e}")
+            self.send_json({"ok": False, "error": str(e)}, status=500)
+        finally:
+            shutil.rmtree(tmp_root, ignore_errors=True)
 
     def handle_save(self):
         stamp = time.strftime("%H:%M:%S")

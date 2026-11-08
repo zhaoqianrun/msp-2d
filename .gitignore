@@ -14,3 +14,6 @@ ship.json
 .idea/
 Thumbs.db
 desktop.ini
+
+# 自动更新前的存档备份
+backups/
