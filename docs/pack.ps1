@@ -43,7 +43,8 @@ Write-Host "============================================" -ForegroundColor White
 Write-Host ""
 
 # ---- 要排除的东西 ----
-$excludeDirs = @('.git', '__pycache__', 'node_modules', '.vscode')
+$excludeDirs = @('.git', '__pycache__', 'node_modules', '.vscode',
+                'docs', 'backups')   # docs 是官网目录，里面就有 zip 本身；backups 是更新前的存档备份
 $excludeFiles = @('savegame.json', 'ship.json', 'clients.json', 'shared-state.json',
                   '.DS_Store', 'Thumbs.db')
 
@@ -56,8 +57,9 @@ Get-ChildItem $GameDir -Recurse -File | ForEach-Object {
 
     # 排除目录
     $inExcluded = $false
+    $parts = $rel -split '[\\/]'
     foreach ($d in $excludeDirs) {
-        if ($rel -match "(^|\\)$([regex]::Escape($d))(\\|$)") { $inExcluded = $true; break }
+        if ($parts -contains $d) { $inExcluded = $true; break }
     }
     # 排除文件
     if (-not $inExcluded -and $excludeFiles -contains $_.Name) { $inExcluded = $true }
