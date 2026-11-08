@@ -17,3 +17,6 @@ desktop.ini
 
 # 自动更新前的存档备份
 backups/
+
+# 打包脚本塞进 zip 的说明文件（更新解压后会出现在根目录）
+README.txt
